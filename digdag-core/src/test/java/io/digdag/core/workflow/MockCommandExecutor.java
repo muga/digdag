@@ -70,4 +70,11 @@ public class MockCommandExecutor
     {
         throw new UnsupportedOperationException();
     }
+
+    @Override
+    public CommandResult get(CommandState state)
+            throws IOException
+    {
+        throw new UnsupportedOperationException();
+    }
 }

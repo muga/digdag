@@ -1,20 +1,50 @@
 package io.digdag.standards.operator;
 
+<<<<<<< HEAD
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.api.client.util.Maps;
 import com.google.common.annotations.VisibleForTesting;
+=======
+import java.util.List;
+import java.io.Writer;
+import java.io.BufferedWriter;
+import java.io.OutputStreamWriter;
+import java.io.OutputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import com.google.common.base.Optional;
+>>>>>>> Change spi.CommandExecutor SPI v2
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.CharStreams;
 import com.google.inject.Inject;
+<<<<<<< HEAD
 import io.digdag.client.config.Config;
 import io.digdag.client.config.ConfigElement;
 import io.digdag.spi.CommandContext;
 import io.digdag.spi.CommandRequest;
 import io.digdag.spi.CommandExecutor;
 import io.digdag.spi.CommandStatus;
+=======
+import io.digdag.spi.CommandContext;
+import io.digdag.spi.CommandState;
+import io.digdag.spi.OperatorContext;
+import io.digdag.util.AbstractWaitOperatorFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import io.digdag.spi.CommandExecutor;
+import io.digdag.spi.CommandLogger;
+import io.digdag.spi.TaskRequest;
+import io.digdag.spi.CommandResult;
+import io.digdag.standards.command.DefaultCommandContext;
+import io.digdag.standards.operator.state.TaskState;
+import io.digdag.spi.TaskResult;
+>>>>>>> Change spi.CommandExecutor SPI v2
 import io.digdag.spi.Operator;
 import io.digdag.spi.OperatorContext;
 import io.digdag.spi.OperatorFactory;
@@ -22,6 +52,7 @@ import io.digdag.spi.TaskExecutionException;
 import io.digdag.spi.TaskResult;
 import io.digdag.standards.operator.state.TaskState;
 import io.digdag.util.BaseOperator;
+<<<<<<< HEAD
 import io.digdag.util.CommandOperators;
 import java.io.IOException;
 import java.io.InputStream;
@@ -36,8 +67,11 @@ import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+=======
+>>>>>>> Change spi.CommandExecutor SPI v2
 
 public class PyOperatorFactory
+        extends AbstractWaitOperatorFactory
         implements OperatorFactory
 {
     private static final String OUTPUT_FILE = "output.json";
@@ -60,8 +94,13 @@ public class PyOperatorFactory
     private final ObjectMapper mapper;
 
     @Inject
+<<<<<<< HEAD
     public PyOperatorFactory(CommandExecutor exec, ObjectMapper mapper)
+=======
+    public PyOperatorFactory(Config systemConfig, CommandExecutor exec, ObjectMapper mapper)
+>>>>>>> Change spi.CommandExecutor SPI v2
     {
+        super("py", systemConfig);
         this.exec = exec;
         this.mapper = mapper;
     }
@@ -91,12 +130,21 @@ public class PyOperatorFactory
     class PyOperator
             extends BaseOperator
     {
+<<<<<<< HEAD
         // TODO extract as config params.
         final int scriptPollInterval = (int) Duration.ofSeconds(3).getSeconds();
+=======
+        private final Config params;
+        private final TaskState state;
+        private final int scriptPollInterval;
+>>>>>>> Change spi.CommandExecutor SPI v2
 
         public PyOperator(OperatorContext context)
         {
             super(context);
+            this.params = request.getConfig().mergeDefault(request.getConfig().getNestedOrGetEmpty(getType()));
+            this.state = TaskState.of(request);
+            this.scriptPollInterval = PyOperatorFactory.this.getPollInterval(params);
         }
 
         @Override
