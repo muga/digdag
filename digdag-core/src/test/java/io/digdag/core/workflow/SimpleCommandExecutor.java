@@ -8,6 +8,7 @@ import com.google.common.base.Optional;
 import io.digdag.spi.CommandContext;
 import io.digdag.spi.CommandExecutor;
 import io.digdag.spi.CommandResult;
+import io.digdag.spi.CommandState;
 import io.digdag.spi.TaskRequest;
 
 public class SimpleCommandExecutor
@@ -27,6 +28,13 @@ public class SimpleCommandExecutor
 
     @Override
     public CommandResult start(CommandContext context)
+            throws IOException
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public CommandResult get(CommandState state)
             throws IOException
     {
         throw new UnsupportedOperationException();
