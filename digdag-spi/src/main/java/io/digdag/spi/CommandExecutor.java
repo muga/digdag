@@ -3,7 +3,7 @@ package io.digdag.spi;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 
-public interface CommandExecutor<T extends CommandContext>
+public interface CommandExecutor
 {
     /**
      * Starts a command and returns its state. Caller must check isFinished of the returned CommandStatus.
