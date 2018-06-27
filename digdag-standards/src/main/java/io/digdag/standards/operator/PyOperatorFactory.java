@@ -1,35 +1,41 @@
 package io.digdag.standards.operator;
 
-import java.util.List;
-import java.io.Writer;
 import java.io.BufferedWriter;
-import java.io.OutputStreamWriter;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
+import java.nio.file.Path;
+import java.util.List;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.CharStreams;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.inject.Inject;
+import io.digdag.client.config.ConfigElement;
+import io.digdag.spi.CommandExecutorContent;
 import io.digdag.spi.OperatorContext;
+import io.digdag.spi.TaskExecutionException;
+import io.digdag.standards.command.ProcessCommandExecutor;
+import io.digdag.util.AbstractWaitOperatorFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import io.digdag.spi.CommandExecutor;
-import io.digdag.spi.CommandLogger;
-import io.digdag.spi.TaskRequest;
+import io.digdag.spi.CommandStatus;
+import io.digdag.standards.operator.state.TaskState;
 import io.digdag.spi.TaskResult;
 import io.digdag.spi.Operator;
 import io.digdag.spi.OperatorFactory;
 import io.digdag.client.config.Config;
 import io.digdag.util.BaseOperator;
-import static io.digdag.standards.operator.ShOperatorFactory.collectEnvironmentVariables;
 
 public class PyOperatorFactory
+        extends AbstractWaitOperatorFactory
         implements OperatorFactory
 {
     private static Logger logger = LoggerFactory.getLogger(PyOperatorFactory.class);
@@ -48,15 +54,13 @@ public class PyOperatorFactory
     }
 
     private final CommandExecutor exec;
-    private final CommandLogger clog;
     private final ObjectMapper mapper;
 
     @Inject
-    public PyOperatorFactory(CommandExecutor exec, CommandLogger clog,
-            ObjectMapper mapper)
+    public PyOperatorFactory(Config systemConfig, CommandExecutor exec, ObjectMapper mapper)
     {
+        super("py", systemConfig);
         this.exec = exec;
-        this.clog = clog;
         this.mapper = mapper;
     }
 
@@ -74,9 +78,16 @@ public class PyOperatorFactory
     private class PyOperator
             extends BaseOperator
     {
+        private final Config params;
+        private final TaskState state;
+        private final int scriptPollInterval;
+
         public PyOperator(OperatorContext context)
         {
             super(context);
+            this.params = request.getConfig().mergeDefault(request.getConfig().getNestedOrGetEmpty(getType()));
+            this.state = TaskState.of(request);
+            this.scriptPollInterval = PyOperatorFactory.this.getPollInterval(params);
         }
 
         @Override
@@ -101,59 +112,87 @@ public class PyOperatorFactory
                 .build();
         }
 
-        private Config runCode(Config params)
+        private Config runCode(final Config params)
                 throws IOException, InterruptedException
         {
-            String inFile = workspace.createTempFile("digdag-py-in-", ".tmp");
-            String outFile = workspace.createTempFile("digdag-py-out-", ".tmp");
+            //ClogProxyOutputStream cmdout = new ClogProxyOutputStream(clog); // TODO
+            final Config stateParams = state.params();
+            final Path projectPath = workspace.getProjectPath();
+            final Path workspacePath = workspace.getPath();
 
-            String script;
-            List<String> args;
+            final CommandStatus status;
+            if (!stateParams.has("commandId")) {
+                final String inputFile = workspace.createTempFile("digdag-py-in-", ".tmp");
+                final String outputFile = workspace.createTempFile("digdag-py-out-", ".tmp");
+                final String runnerFile = workspace.createTempFile("digdag-py-runner-", ".py");
 
-            if (params.has("_command")) {
-                String command = params.get("_command", String.class);
-                script = runnerScript;
-                args = ImmutableList.of(command, inFile, outFile);
+                final String script;
+                final List<String> cmdline;
+
+                if (params.has("_command")) {
+                    String command = params.get("_command", String.class);
+                    script = runnerScript;
+                    cmdline = ImmutableList.<String>builder()
+                            //.add("bash")
+                            //.add("-c")
+                            .add(String.format("/bin/cat %s | python - %s %s %s", runnerFile, command, inputFile, outputFile))
+                            .build();
+                }
+                else {
+                    script = params.get("script", String.class);
+                    cmdline = ImmutableList.<String>builder()
+                            .add("bash")
+                            .add("-c")
+                            .add(String.format("cat %s | python - %s %s", runnerFile, inputFile, outputFile))
+                            .build();
+                }
+
+                // Write params to inFile
+                try (final OutputStream out = workspace.newOutputStream(inputFile)) {
+                    mapper.writeValue(out, ImmutableMap.of("params", params));
+                }
+
+                // Write script content to runnerFile
+                try (final Writer writer = new BufferedWriter(new OutputStreamWriter(workspace.newOutputStream(runnerFile)))) {
+                    writer.write(script);
+                }
+
+                Map<String, String> environments = System.getenv();
+                ProcessCommandExecutor.collectEnvironmentVariables(environments, context.getPrivilegedVariables());
+
+                status = exec.run(projectPath, workspacePath, request,
+                        environments,
+                        cmdline,
+                        ImmutableMap.<String, CommandExecutorContent>builder()
+                                .put("input_content", CommandExecutorContent.create(workspacePath, inputFile))
+                                .put("runner_content", CommandExecutorContent.create(workspacePath, runnerFile))
+                                .build(),
+                        CommandExecutorContent.create(workspacePath, outputFile) // out_content
+                );
+
+                // TaskExecutionException could not be thrown here to poll the task by non-blocking for process-base
+                // command executor. Because they will be bounded by the _instance_ where the command was executed
+                // first.
             }
             else {
-                script = params.get("script", String.class);
-                args = ImmutableList.of(inFile, outFile);
+                // Poll tasks by non-blocking
+                final String commandId = stateParams.get("commandId", String.class);
+                final Config executorState = stateParams.getNestedOrGetEmpty("executorState");
+                status = exec.poll(projectPath, workspacePath, request, commandId, executorState);
             }
 
-            try (OutputStream fo = workspace.newOutputStream(inFile)) {
-                mapper.writeValue(fo, ImmutableMap.of("params", params));
+            //status.getCommandOutput().writeTo(clog); // TODO
+            if (status.isFinished()) {
+                CommandExecutorContent outputContent = status.getOutputContent();
+                //return mapper.readValue(workspace.getFile(outputContent.getName()), Config.class); // TODO stop this
+                return stateParams;
             }
-
-            List<String> cmdline = ImmutableList.<String>builder()
-                .add("python").add("-")  // script is fed from stdin
-                .addAll(args)
-                .build();
-
-            ProcessBuilder pb = new ProcessBuilder(cmdline);
-            pb.directory(workspace.getPath().toFile());
-            pb.redirectErrorStream(true);
-
-            // Set up process environment according to env config. This can also refer to secrets.
-            Map<String, String> env = pb.environment();
-            collectEnvironmentVariables(env, context.getPrivilegedVariables());
-
-            Process p = exec.start(workspace.getPath(), request, pb);
-
-            // feed script to stdin
-            try (Writer writer = new BufferedWriter(new OutputStreamWriter(p.getOutputStream()))) {
-                writer.write(script);
+            else {
+                stateParams.set("commandId", status.getCommandId());
+                stateParams.set("executorState", status.getExecutorState());
+                //throw TaskExecutionException.ofNextPolling(scriptPollInterval, ConfigElement.copyOf(stateParams));
+                throw TaskExecutionException.ofNextPolling(3, ConfigElement.copyOf(stateParams));
             }
-
-            // copy stdout to System.out and logger
-            clog.copyStdout(p, System.out);
-
-            int ecode = p.waitFor();
-
-            if (ecode != 0) {
-                throw new RuntimeException("Python command failed with code " + ecode);
-            }
-
-            return mapper.readValue(workspace.getFile(outFile), Config.class);
         }
     }
 }
