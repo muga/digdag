@@ -227,7 +227,7 @@ public class KubernetesCommandExecutor
             final String archiveKey = createStorageKey(request, commandId, relativeArchivePath);
             uploadFile(archiveKey, archivePath, configParamStorage); // throw IOException
             final String url = getDirectDownloadUrl(archiveKey, configParamStorage);
-            beforeArguments.add("curl \"" + url + "\" --output " + relativeArchivePath);
+            beforeArguments.add("curl -s \"" + url + "\" --output " + relativeArchivePath);
             beforeArguments.add("tar -zxf " + relativeArchivePath);
         }
         finally {
@@ -248,7 +248,7 @@ public class KubernetesCommandExecutor
             final String outputFileKey = createStorageKey(request, commandId, relativePath);
             uploadFile(outputFileKey, absoluteOutputPath, configParamStorage); // throw IOException
             final String outputUrl = getDirectUploadUrl(outputFileKey, configParamStorage);
-            afterArguments.add(String.format("cat %s | curl -X PUT -d @- -H \"Content-Type: application/json\" \"%s\"", relativePath, outputUrl));
+            afterArguments.add(String.format("cat %s | curl -s -X PUT -d @- -H \"Content-Type: application/json\" \"%s\"", relativePath, outputUrl));
         }
 
         final List<String> commands = Lists.newArrayList("/bin/bash", "-c");
