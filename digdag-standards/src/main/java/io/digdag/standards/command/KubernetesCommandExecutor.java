@@ -214,7 +214,7 @@ public class KubernetesCommandExecutor
         final ImmutableList.Builder<String> beforeArguments = ImmutableList.builder();
         final ImmutableList.Builder<String> afterArguments = ImmutableList.builder();
 
-        beforeArguments.add("set -eux ");
+        beforeArguments.add("set -e");
         beforeArguments.add("mkdir -p " + projectPath.relativize(workspacePath.resolve(".digdag/tmp/" + commandId)).toString());
 
         // Create project archive on local. Input contents, e.g. input config file and runner script, are included
