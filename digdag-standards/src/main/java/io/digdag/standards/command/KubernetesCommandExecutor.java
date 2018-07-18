@@ -228,7 +228,7 @@ public class KubernetesCommandExecutor
             uploadFile(archiveKey, archivePath, configParamStorage); // throw IOException
             final String url = getDirectDownloadUrl(archiveKey, configParamStorage);
             beforeArguments.add("curl \"" + url + "\" --output " + relativeArchivePath);
-            beforeArguments.add("tar -zxvf " + relativeArchivePath);
+            beforeArguments.add("tar -zxf " + relativeArchivePath);
         }
         finally {
             if (archivePath != null) {
