@@ -17,12 +17,12 @@ public class KubernetesCommandStatus
 {
     private static final JsonNodeFactory FACTORY = JsonNodeFactory.instance;
 
-    static KubernetesCommandStatus copyOf(final CommandStatus commandStatus)
+    static KubernetesCommandStatus copyFrom(final CommandStatus commandStatus)
     {
         return new KubernetesCommandStatus(commandStatus.getObjectNode().deepCopy(), Maps.newHashMap());
     }
 
-    static KubernetesCommandStatus createByCommandExecutor(final Pod pod,
+    static KubernetesCommandStatus create(final Pod pod,
             final boolean isFinished,
             final ObjectNode executorState,
             final Map<String, CommandExecutorContent> outputContents)

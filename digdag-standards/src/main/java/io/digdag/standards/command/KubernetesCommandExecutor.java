@@ -128,7 +128,7 @@ public class KubernetesCommandExecutor
             throws IOException, InterruptedException
     {
         try (final KubernetesClient kubernetesClient = KubernetesClient.create(createKubernetesClientConfig(request.getConfig()))) {
-            final KubernetesCommandStatus kubernetesCommandStatus = KubernetesCommandStatus.copyOf(previousCommandStatus);
+            final KubernetesCommandStatus kubernetesCommandStatus = KubernetesCommandStatus.copyFrom(previousCommandStatus);
             final ObjectNode nextExecutorState = kubernetesCommandStatus.getExecutorState().deepCopy();
             final String commandId = kubernetesCommandStatus.getId();
             final Pod pod = kubernetesClient.getPod(commandId);
@@ -460,6 +460,6 @@ public class KubernetesCommandExecutor
             final ObjectNode executorState,
             final Map<String, CommandExecutorContent> outputContents)
     {
-        return KubernetesCommandStatus.createByCommandExecutor(pod, isFinished, executorState, outputContents);
+        return KubernetesCommandStatus.create(pod, isFinished, executorState, outputContents);
     }
 }
