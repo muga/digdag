@@ -1,15 +1,15 @@
 package io.digdag.standards.command.kubernetes;
 
-import com.google.common.collect.Lists;
+import com.google.common.collect.ImmutableList;
 import com.google.common.io.CharStreams;
-import io.digdag.spi.CommandLogger;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.ContainerBuilder;
 import io.fabric8.kubernetes.api.model.ContainerStatus;
+import io.fabric8.kubernetes.api.model.EnvVar;
+import io.fabric8.kubernetes.api.model.EnvVarBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodSpec;
 import io.fabric8.kubernetes.api.model.PodSpecBuilder;
-import io.fabric8.kubernetes.api.model.PodStatus;
 import io.fabric8.kubernetes.client.Config;
 import io.fabric8.kubernetes.client.ConfigBuilder;
 import io.fabric8.kubernetes.client.DefaultKubernetesClient;
@@ -17,11 +17,8 @@ import io.fabric8.kubernetes.client.dsl.PodResource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.Reader;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -109,15 +106,27 @@ public class KubernetesClient
     public Container createContainer(
             final String name,
             final String image,
+            final Map<String, String> environments,
             final List<String> commands,
             final List<String> arguments)
     {
         return new ContainerBuilder()
+                .withEnv(toEnvVars(environments))
                 .withName(name)
                 .withImage(image)
                 .withCommand(commands)
-                .withArgs(arguments.stream().map(Object::toString).collect(Collectors.joining("; ")))
+                .withArgs(arguments)
                 .build();
+    }
+
+    private static List<EnvVar> toEnvVars(final Map<String, String> environments)
+    {
+        final ImmutableList.Builder<EnvVar> envVars = ImmutableList.builder();
+        for (final Map.Entry<String, String> e : environments.entrySet()) {
+            final EnvVar envVar = new EnvVarBuilder().withName(e.getKey()).withValue(e.getValue()).build();
+            envVars.add(envVar);
+        }
+        return envVars.build();
     }
 
     @Override
