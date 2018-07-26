@@ -3,7 +3,8 @@ package io.digdag.spi;
 import com.fasterxml.jackson.annotation.JsonValue;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-public class CommandStatus
+@Value.Immutable
+public interface CommandStatus
 {
     /**
      * Check command is finished or not.
