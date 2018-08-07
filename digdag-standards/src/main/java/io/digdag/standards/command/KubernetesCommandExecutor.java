@@ -82,15 +82,6 @@ public class KubernetesCommandExecutor
         this.clog = clog;
     }
 
-    // TODO Will be removed before v0.10.x
-    @Override
-    @Deprecated
-    public Process start(final Path projectPath, final TaskRequest request, final ProcessBuilder pb)
-            throws IOException
-    {
-        throw new UnsupportedOperationException("This method is not supported.");
-    }
-
     @Override
     public CommandStatus run(final CommandExecutorContext context, final CommandExecutorRequest request)
             throws IOException
