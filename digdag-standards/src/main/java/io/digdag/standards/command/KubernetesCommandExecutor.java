@@ -209,7 +209,7 @@ public class KubernetesCommandExecutor
         // Build command line arguments that will be passed to Kubernetes API here
         final ImmutableList.Builder<String> bashArguments = ImmutableList.builder();
 
-        bashArguments.add("set -eux"); // TODO
+        //bashArguments.add("set -eux"); // TODO revisit we need it or not
         bashArguments.add("mkdir -p " + ioDirectoryPath.toString());
 
         // Create project archive on local. Input contents, e.g. input config file and runner script, are included
@@ -249,7 +249,7 @@ public class KubernetesCommandExecutor
         final String url = getDirectUploadUrl(outputArchiveKey, configParamStorage);
         bashArguments.add("popd");
         bashArguments.add(String.format("tar -zcf %s  --exclude %s --exclude %s .digdag/tmp/", outputArchivePathName, archivePathName, outputArchivePathName));
-        bashArguments.add(String.format("curl -X PUT -T %s -L \"%s\"", outputArchivePathName, url));
+        bashArguments.add(String.format("curl -s -X PUT -T %s -L \"%s\"", outputArchivePathName, url));
         bashArguments.add("exit $exit_code");
 
         final List<String> commands = ImmutableList.of("/bin/bash");
