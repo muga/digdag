@@ -14,10 +14,10 @@ import io.digdag.core.archive.ProjectArchiveLoader;
 import io.digdag.core.archive.ProjectArchives;
 import io.digdag.core.archive.WorkflowResourceMatcher;
 import io.digdag.core.storage.StorageManager;
+import io.digdag.spi.CommandContext;
 import io.digdag.spi.CommandExecutor;
-import io.digdag.spi.CommandExecutorContext;
-import io.digdag.spi.CommandExecutorRequest;
 import io.digdag.spi.CommandLogger;
+import io.digdag.spi.CommandRequest;
 import io.digdag.spi.CommandStatus;
 import io.digdag.spi.Storage;
 import io.digdag.spi.StorageFileNotFoundException;
@@ -83,7 +83,7 @@ public class KubernetesCommandExecutor
     }
 
     @Override
-    public CommandStatus run(final CommandExecutorContext context, final CommandExecutorRequest request)
+    public CommandStatus run(final CommandContext context, final CommandRequest request)
             throws IOException
     {
         final Config config = context.getTaskRequest().getConfig();
@@ -107,7 +107,7 @@ public class KubernetesCommandExecutor
     }
 
     @Override
-    public CommandStatus poll(final CommandExecutorContext context,
+    public CommandStatus poll(final CommandContext context,
             final ObjectNode previousStatusJson)
             throws IOException
     {
@@ -195,8 +195,8 @@ public class KubernetesCommandExecutor
         return null; // will fallback to DockerCommandExecutor
     }
 
-    private CommandStatus runOnKubernetes(final CommandExecutorContext context,
-            final CommandExecutorRequest request,
+    private CommandStatus runOnKubernetes(final CommandContext context,
+            final CommandRequest request,
             final KubernetesClient kubernetesClient,
             final Storage configParamStorage)
             throws IOException
@@ -239,7 +239,7 @@ public class KubernetesCommandExecutor
         }
 
         // Add command passed from operator.
-        bashArguments.add(request.getCommand().stream().map(Object::toString).collect(Collectors.joining(" ")));
+        bashArguments.add(request.getCommandLine().stream().map(Object::toString).collect(Collectors.joining(" ")));
         bashArguments.add("exit_code=$?");
 
         // Create project archive path in the container
