@@ -42,6 +42,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import io.digdag.standards.command.kubernetes.TemporalConfigStorage;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.ContainerStateTerminated;
 import io.fabric8.kubernetes.api.model.ContainerStatus;
@@ -87,32 +88,35 @@ public class KubernetesCommandExecutor
             throws IOException
     {
         final Config config = context.getTaskRequest().getConfig();
-        final KubernetesClientConfig kubernetesClientConfig = createKubernetesClientConfig(config);
-        final Storage temporalConfigStorage = createTemporalConfigStorage(config);
-
-        if (kubernetesClientConfig != null && temporalConfigStorage != null) {
-            try (final KubernetesClient kubernetesClient = KubernetesClient.create(kubernetesClientConfig)) {
-                // Check connectivity with the master of Kubernetes cluster. If true, the client sends a pod request
-                // to the master. Otherwise, it falls back and uses DockerCommandExecutor instead.
-                if (kubernetesClient.test()) {
-                    return runOnKubernetes(context, request, kubernetesClient, temporalConfigStorage);
-                }
+        try {
+            final KubernetesClientConfig clientConfig =
+                    KubernetesClientConfig.create(systemConfig, config); // config exception
+            final TemporalConfigStorage storage =
+                    TemporalConfigStorage.create(storageManager, systemConfig); // config exception
+            try (final KubernetesClient client = KubernetesClient.create(clientConfig)) {
+                return runOnKubernetes(context, request, client, storage);
             }
         }
+        catch (ConfigException e) {
+            // TODO We'd better to implement chain of responsibility pattern for multiple CommandExecutor selection.
 
-        // TODO We'd better to implement chain of responsibility pattern for multiple CommandExecutor selection.
-
-        // Fall back to DockerCommandExecutor
-        return docker.run(context, request);
+            // fall back to DockerCommandExecutor
+            return docker.run(context, request);
+        }
     }
 
     @Override
-    public CommandStatus poll(final CommandContext context,
-            final ObjectNode previousStatusJson)
+    public CommandStatus poll(final CommandContext context, final ObjectNode previousStatusJson)
             throws IOException
     {
         final Config config = context.getTaskRequest().getConfig();
-        try (final KubernetesClient kubernetesClient = KubernetesClient.create(createKubernetesClientConfig(config))) {
+        final KubernetesClientConfig clientConfig =
+                KubernetesClientConfig.create(systemConfig, config); // config exception
+        final TemporalConfigStorage storage =
+                TemporalConfigStorage.create(storageManager, systemConfig); // config exception
+        // TODO We'd better to treat config exception here
+
+        try (final KubernetesClient kubernetesClient = KubernetesClient.create(clientConfig)) {
             final String podName = previousStatusJson.get("pod_name").asText();
             final Pod pod = kubernetesClient.getPod(podName);
 
@@ -148,10 +152,9 @@ public class KubernetesCommandExecutor
                 final String outputArchivePathName = ".digdag/tmp/archive-output.tar.gz";
                 final String outputArchiveKey = createStorageKey(context.getTaskRequest(), ioDirectoryPathName, outputArchivePathName); // url format
 
-                final Storage temporalConfigStorage = createTemporalConfigStorage(config);
                 // Download output config archive
                 try {
-                    final StorageObject so = temporalConfigStorage.open(outputArchiveKey);
+                    final StorageObject so = storage.getStorage().open(outputArchiveKey);
                     final InputStream in = so.getContentInputStream();
                     ProjectArchives.extractTarArchive(context.getLocalProjectPath(), in);
                 }
@@ -164,41 +167,10 @@ public class KubernetesCommandExecutor
         }
     }
 
-    private KubernetesClientConfig createKubernetesClientConfig(final Config config)
-    {
-        try {
-            if (config.has("kubernetes")) { // from request config
-                return KubernetesClientConfig.createFromTaskRequestConfig(config.getNested("kubernetes")); // ConfigException
-            }
-            else { // from system config
-                return KubernetesClientConfig.createFromSystemConfig(systemConfig); // ConfigException
-            }
-        }
-        catch (ConfigException ignored) {
-        }
-        return null; // will fall back to DockerCommandExecutor
-    }
-
-    private Storage createTemporalConfigStorage(final Config config)
-    {
-        try {
-            if (config.has("kubernetes") && config.getNested("kubernetes").has("config_storage")) { // from request config
-                throw new UnsupportedOperationException(); // TODO
-            }
-            else { // from system config
-                // TODO revisit reconsider about parameters name
-                return storageManager.create(systemConfig, "agent.command_executor.kubernetes.config_storage."); // ConfigException
-            }
-        }
-        catch (ConfigException ignored) {
-        }
-        return null; // will fallback to DockerCommandExecutor
-    }
-
     private CommandStatus runOnKubernetes(final CommandContext context,
             final CommandRequest request,
             final KubernetesClient kubernetesClient,
-            final Storage configParamStorage)
+            final TemporalConfigStorage storage)
             throws IOException
     {
         final Path projectPath = context.getLocalProjectPath();
@@ -220,8 +192,8 @@ public class KubernetesCommandExecutor
         try {
             // Upload archive on params storage
             final String archiveKey = createStorageKey(context.getTaskRequest(), ioDirectoryPath.toString(), archivePathName); // TODO url format
-            uploadFile(archiveKey, archivePath, configParamStorage); // throw IOException
-            final String url = getDirectDownloadUrl(archiveKey, configParamStorage);
+            uploadFile(archiveKey, archivePath, storage.getStorage()); // throw IOException
+            final String url = getDirectDownloadUrl(archiveKey, storage.getStorage());
             bashArguments.add("curl -s \"" + url + "\" --output " + archivePathName);
             bashArguments.add("tar -zxf " + archivePathName);
             final String pushdDir = request.getWorkingDirectory().toString();
@@ -246,7 +218,7 @@ public class KubernetesCommandExecutor
         // Upload the archive file to the S3 bucket
         final String outputArchivePathName = ".digdag/tmp/archive-output.tar.gz";
         final String outputArchiveKey = createStorageKey(context.getTaskRequest(), ioDirectoryPath.toString(), outputArchivePathName); // url format
-        final String url = getDirectUploadUrl(outputArchiveKey, configParamStorage);
+        final String url = getDirectUploadUrl(outputArchiveKey, storage.getStorage());
         bashArguments.add("popd");
         bashArguments.add(String.format("tar -zcf %s  --exclude %s --exclude %s .digdag/tmp/", outputArchivePathName, archivePathName, outputArchivePathName));
         bashArguments.add(String.format("curl -s -X PUT -T %s -L \"%s\"", outputArchivePathName, url));

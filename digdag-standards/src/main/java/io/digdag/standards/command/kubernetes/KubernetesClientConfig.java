@@ -1,10 +1,38 @@
 package io.digdag.standards.command.kubernetes;
 
 import io.digdag.client.config.Config;
+import io.digdag.client.config.ConfigException;
 
 public class KubernetesClientConfig
 {
-    public static KubernetesClientConfig createFromSystemConfig(final io.digdag.client.config.Config systemConfig)
+    public static KubernetesClientConfig create(final Config systemConfig, final Config requestConfig)
+            throws ConfigException
+    {
+        if (requestConfig.has("kubernetes")) { // task from request config
+            return KubernetesClientConfig.createFromTaskRequestConfig(requestConfig.getNested("kubernetes"));
+        }
+        else { // from system config
+            return KubernetesClientConfig.createFromSystemConfig(systemConfig);
+        }
+    }
+
+    private static KubernetesClientConfig createFromTaskRequestConfig(final Config config)
+    {
+        // TODO throw config exception if parameters are missed
+        if (!config.has("master") ||
+                !config.has("certs_ca_data") ||
+                !config.has("oauth_token") ||
+                !config.has("namespace")) {
+            return null;
+        }
+
+        return create(config.get("master", String.class),
+                config.get("certs_ca_data", String.class),
+                config.get("oauth_token", String.class),
+                config.get("namespace", String.class));
+    }
+
+    private static KubernetesClientConfig createFromSystemConfig(final io.digdag.client.config.Config systemConfig)
     {
         // TODO throw config exception if parameters are missed
         final String configKeyPrefix = "agent.command_executor.kubernetes.";
@@ -19,22 +47,6 @@ public class KubernetesClientConfig
                 systemConfig.get(configKeyPrefix + "certs_ca_data", String.class),
                 systemConfig.get(configKeyPrefix + "oauth_token", String.class),
                 systemConfig.get(configKeyPrefix + "namespace", String.class));
-    }
-
-    public static KubernetesClientConfig createFromTaskRequestConfig(final Config config)
-    {
-        // TODO throw config exception if parameters are missed
-        if (!config.has("master") ||
-                !config.has("certs_ca_data") ||
-                !config.has("oauth_token") ||
-                !config.has("namespace")) {
-            return null;
-        }
-
-        return create(config.get("master", String.class),
-                config.get("certs_ca_data", String.class),
-                config.get("oauth_token", String.class),
-                config.get("namespace", String.class));
     }
 
     private static KubernetesClientConfig create(final String master,
