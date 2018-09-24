@@ -96,10 +96,14 @@ public class KubernetesClient
     public PodSpec createPodSpec(final Container container)
     {
         return new PodSpecBuilder()
-                .addToContainers(container)
                 //.withHostNetwork(true);
                 //.withDnsPolicy("ClusterFirstWithHostNet");
-                .withRestartPolicy("Never") // TODO explain this
+                .addToContainers(container)
+                // TODO extract as config parameter
+                // Restart policy is "Never" by default since it needs to avoid executing the operator multiple times. It might not
+                // make the script idempotent.
+                // https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#restart-policy
+                .withRestartPolicy("Never")
                 .build();
     }
 
