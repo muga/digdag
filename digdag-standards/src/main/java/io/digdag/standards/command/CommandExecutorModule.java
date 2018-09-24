@@ -15,6 +15,5 @@ public class CommandExecutorModule
         binder.bind(CommandExecutor.class).to(KubernetesCommandExecutor.class).in(Scopes.SINGLETON);
         binder.bind(SimpleCommandExecutor.class).in(Scopes.SINGLETON);
         binder.bind(DockerCommandExecutor.class).in(Scopes.SINGLETON);
-        binder.bind(KubernetesCommandExecutor.class).in(Scopes.SINGLETON);
     }
 }
