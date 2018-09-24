@@ -4,39 +4,45 @@ import io.digdag.client.config.Config;
 import io.digdag.client.config.ConfigException;
 import io.digdag.core.storage.StorageManager;
 
+import java.util.Optional;
+
 public class KubernetesClientConfig
 {
     private static final String KUBERNETES_CLIENT_PARAMS_PREFIX = "agent.command_executor.kubernetes.";
 
-    public static KubernetesClientConfig create(final Config systemConfig, final Config requestConfig)
-            throws ConfigException
+    public static KubernetesClientConfig create(final Optional<String> name,
+            final Config systemConfig,
+            final Config requestConfig)
     {
         if (requestConfig.has("kubernetes")) {
             // from task request config
-            return KubernetesClientConfig.createFromTaskRequestConfig(requestConfig.getNested("kubernetes"));
+            return KubernetesClientConfig.createFromTaskRequestConfig(name, requestConfig.getNested("kubernetes"));
         }
         else {
             // from system config
-            return KubernetesClientConfig.createFromSystemConfig(systemConfig);
+            return KubernetesClientConfig.createFromSystemConfig(name, systemConfig);
         }
     }
 
-    private static KubernetesClientConfig createFromTaskRequestConfig(final Config config)
+    private static KubernetesClientConfig createFromTaskRequestConfig(final Optional<String> name,
+            final Config config)
     {
-        validateParams(config);
-        return create(config.get("name", String.class, "default"),
-                config.get("master", String.class),
-                config.get("certs_ca_data", String.class),
-                config.get("oauth_token", String.class),
-                config.get("namespace", String.class));
+        throw new UnsupportedOperationException("Not support yet"); // TODO
     }
 
-    private static KubernetesClientConfig createFromSystemConfig(final io.digdag.client.config.Config systemConfig)
+    private static KubernetesClientConfig createFromSystemConfig(final Optional<String> name,
+            final io.digdag.client.config.Config systemConfig)
     {
-        final String name = systemConfig.get(KUBERNETES_CLIENT_PARAMS_PREFIX + "name", String.class, "default");
-        final String keyPrefix = "default".equals(name) ? KUBERNETES_CLIENT_PARAMS_PREFIX : KUBERNETES_CLIENT_PARAMS_PREFIX + name + ".";
+        final String clusterName;
+        if (!name.isPresent()) {
+            clusterName = systemConfig.get(KUBERNETES_CLIENT_PARAMS_PREFIX + "name", String.class);
+        }
+        else {
+            clusterName = name.get();
+        }
+        final String keyPrefix = KUBERNETES_CLIENT_PARAMS_PREFIX + clusterName + ".";
         final Config extracted = validateParams(StorageManager.extractKeyPrefix(systemConfig, keyPrefix));
-        return create(name,
+        return create(clusterName,
                 extracted.get("master", String.class),
                 extracted.get("certs_ca_data", String.class),
                 extracted.get("oauth_token", String.class),

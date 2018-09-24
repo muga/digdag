@@ -36,13 +36,20 @@ public class KubernetesClient
                 .withCaCertData(kubernetesClientConfig.getCertsCaData())
                 .withOauthToken(kubernetesClientConfig.getOauthToken())
                 .build();
-        return new KubernetesClient(new DefaultKubernetesClient(clientConfig));
+        return new KubernetesClient(kubernetesClientConfig, new DefaultKubernetesClient(clientConfig));
     }
 
+    private final KubernetesClientConfig config;
     private final DefaultKubernetesClient client;
 
-    private KubernetesClient(final DefaultKubernetesClient client) {
+    private KubernetesClient(final KubernetesClientConfig config, final DefaultKubernetesClient client) {
+        this.config = config;
         this.client = client;
+    }
+
+    public KubernetesClientConfig getConfig()
+    {
+        return config;
     }
 
     public boolean test()

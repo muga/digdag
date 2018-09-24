@@ -39,6 +39,7 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -88,8 +89,9 @@ public class KubernetesCommandExecutor
             throws IOException
     {
         final Config config = context.getTaskRequest().getConfig();
+        final Optional<String> clusterName = Optional.empty();
         try {
-            final KubernetesClientConfig clientConfig = KubernetesClientConfig.create(systemConfig, config); // config exception
+            final KubernetesClientConfig clientConfig = KubernetesClientConfig.create(clusterName, systemConfig, config); // config exception
             final TemporalConfigStorage storage = TemporalConfigStorage.create(storageManager, systemConfig); // config exception
             try (final KubernetesClient client = KubernetesClient.create(clientConfig)) {
                 return runOnKubernetes(context, request, client, storage);
@@ -109,7 +111,8 @@ public class KubernetesCommandExecutor
             throws IOException
     {
         final Config config = context.getTaskRequest().getConfig();
-        final KubernetesClientConfig clientConfig = KubernetesClientConfig.create(systemConfig, config); // config exception
+        final Optional<String> clusterName = Optional.of(previousStatusJson.get("cluster_name").asText());
+        final KubernetesClientConfig clientConfig = KubernetesClientConfig.create(clusterName, systemConfig, config); // config exception
         final TemporalConfigStorage storage = TemporalConfigStorage.create(storageManager, systemConfig); // config exception
         // TODO We'd better to treat config exception here
 
@@ -226,6 +229,7 @@ public class KubernetesCommandExecutor
         final Pod pod = runPod(kubernetesClient, podName, containerImage, request.getEnvironments(), commands, arguments);
 
         final ObjectNode nextStatus = FACTORY.objectNode();
+        nextStatus.set("cluster_name", FACTORY.textNode(kubernetesClient.getConfig().getName()));
         nextStatus.set("pod_name", FACTORY.textNode(pod.getMetadata().getName()));
         nextStatus.set("io_directory", FACTORY.textNode(ioDirectoryPath.toString()));
         nextStatus.set("executor_state", FACTORY.objectNode());
