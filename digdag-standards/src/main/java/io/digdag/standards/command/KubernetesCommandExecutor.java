@@ -98,7 +98,6 @@ public class KubernetesCommandExecutor
             }
         }
         catch (ConfigException e) {
-            e.printStackTrace();
             // TODO We'd better to implement chain of responsibility pattern for multiple CommandExecutor selection.
 
             // fall back to DockerCommandExecutor
@@ -170,7 +169,7 @@ public class KubernetesCommandExecutor
         final Path projectPath = context.getLocalProjectPath();
         final Path ioDirectoryPath = request.getIoDirectory(); // relative
         final Config config = context.getTaskRequest().getConfig();
-        final Config dockerConfig = validateDockerConfig(config); // it requires docker: config
+        validateDockerConfig(config); // it requires docker: config
 
         // Build command line arguments that will be passed to Kubernetes API here
         final ImmutableList.Builder<String> bashArguments = ImmutableList.builder();
@@ -224,9 +223,14 @@ public class KubernetesCommandExecutor
         logger.debug("Submit command line arguments to Kubernetes API: " + arguments);
 
         // Create and submit a pod to Kubernetes master
-        final String podName = createUniquePodName(context.getTaskRequest());
-        final String containerImage = dockerConfig.get("image", String.class);
-        final Pod pod = runPod(kubernetesClient, podName, containerImage, request.getEnvironments(), commands, arguments);
+        final Pod pod = runPod(kubernetesClient,
+                createUniquePodName(context.getTaskRequest()),
+                getContainerImage(context, request),
+                getEnvironments(context, request),
+                getResourceLimits(context, request),
+                getResourceRequests(context, request),
+                commands,
+                arguments);
 
         final ObjectNode nextStatus = FACTORY.objectNode();
         nextStatus.set("cluster_name", FACTORY.textNode(kubernetesClient.getConfig().getName()));
@@ -410,17 +414,51 @@ public class KubernetesCommandExecutor
         return e;
     }
 
-    private Pod runPod(final KubernetesClient client,
+    protected Pod runPod(final KubernetesClient client,
             final String podName,
             final String containerImage,
             final Map<String, String> environments,
+            final Map<String, String> resourceLimits,
+            final Map<String, String> resourceRequests,
             final List<String> containerCommands,
             final List<String> containerArguments)
     {
         // container name and pod name are same
-        final Container container = client.createContainer(podName, containerImage, environments, containerCommands, containerArguments);
+        final Container container = client.createContainer(podName,
+                containerImage,
+                environments,
+                resourceLimits,
+                resourceRequests,
+                containerCommands,
+                containerArguments);
         final PodSpec podSpec = client.createPodSpec(container);
         return client.runPod(podName, ImmutableMap.of(), podSpec);
+    }
+
+    protected String getContainerImage(final CommandContext context, final CommandRequest request)
+    {
+        final Config config = context.getTaskRequest().getConfig();
+        final Config dockerConfig = validateDockerConfig(config);
+        return dockerConfig.get("image", String.class);
+    }
+
+    protected Map<String, String> getEnvironments(final CommandContext context, final CommandRequest request)
+    {
+        return request.getEnvironments();
+    }
+
+    protected Map<String, String> getResourceLimits(final CommandContext context, final CommandRequest request)
+    {
+        return ImmutableMap.of(
+                "memory", "1200Mi",
+                "cpu", "1",
+                "ephemeral-storage", "50Gi"
+        );
+    }
+
+    protected Map<String, String> getResourceRequests(final CommandContext context, final CommandRequest request)
+    {
+        return ImmutableMap.of();
     }
 
     private CommandStatus createCommandStatus(final Pod pod,

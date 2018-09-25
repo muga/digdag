@@ -1,6 +1,7 @@
 package io.digdag.standards.command.kubernetes;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.io.CharStreams;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.ContainerBuilder;
@@ -10,6 +11,8 @@ import io.fabric8.kubernetes.api.model.EnvVarBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodSpec;
 import io.fabric8.kubernetes.api.model.PodSpecBuilder;
+import io.fabric8.kubernetes.api.model.Quantity;
+import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.client.Config;
 import io.fabric8.kubernetes.client.ConfigBuilder;
 import io.fabric8.kubernetes.client.DefaultKubernetesClient;
@@ -118,6 +121,8 @@ public class KubernetesClient
             final String name,
             final String image,
             final Map<String, String> environments,
+            final Map<String, String> resourceLimits,
+            final Map<String, String> resourceRequests,
             final List<String> commands,
             final List<String> arguments)
     {
@@ -125,6 +130,7 @@ public class KubernetesClient
                 .withEnv(toEnvVars(environments))
                 .withName(name)
                 .withImage(image)
+                .withResources(toResourceRequirements(resourceLimits, resourceRequests))
                 .withCommand(commands)
                 .withArgs(arguments)
                 .build();
@@ -138,6 +144,23 @@ public class KubernetesClient
             envVars.add(envVar);
         }
         return envVars.build();
+    }
+
+    private static ResourceRequirements toResourceRequirements(
+            final Map<String, String> limits,
+            final Map<String, String> requests)
+    {
+        final ImmutableMap.Builder<String, Quantity> ls = new ImmutableMap.Builder<>();
+        for (Map.Entry<String, String> e : limits.entrySet()) {
+            ls.put(e.getKey(), new Quantity(e.getValue()));
+        }
+
+        final ImmutableMap.Builder<String, Quantity> rs = new ImmutableMap.Builder<>();
+        for (Map.Entry<String, String> e : requests.entrySet()) {
+            rs.put(e.getKey(), new Quantity(e.getValue()));
+        }
+
+        return new ResourceRequirements(ls.build(), rs.build());
     }
 
     @Override
