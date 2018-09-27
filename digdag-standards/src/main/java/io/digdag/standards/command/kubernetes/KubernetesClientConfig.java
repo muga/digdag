@@ -35,6 +35,9 @@ public class KubernetesClientConfig
     {
         final String clusterName;
         if (!name.isPresent()) {
+            if (!systemConfig.get("agent.command_executor.type", String.class, "").equals("kubernetes")) {
+                throw new ConfigException("agent.command_executor.type: is not 'kubernetes'");
+            }
             clusterName = systemConfig.get(KUBERNETES_CLIENT_PARAMS_PREFIX + "name", String.class);
         }
         else {
