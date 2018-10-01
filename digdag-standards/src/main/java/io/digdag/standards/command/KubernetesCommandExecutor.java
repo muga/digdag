@@ -38,6 +38,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import io.digdag.standards.command.kubernetes.KubernetesClientFactory;
 import io.digdag.standards.command.kubernetes.TemporalConfigStorage;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.ContainerStateTerminated;
@@ -59,6 +60,7 @@ public class KubernetesCommandExecutor
     private static Logger logger = LoggerFactory.getLogger(KubernetesCommandExecutor.class);
 
     private final Config systemConfig;
+    private final KubernetesClientFactory kubernetesClientFactory;
     private final DockerCommandExecutor docker;
     private final StorageManager storageManager;
     private final ProjectArchiveLoader projectLoader;
@@ -67,6 +69,7 @@ public class KubernetesCommandExecutor
     @Inject
     public KubernetesCommandExecutor(
             final Config systemConfig,
+            final KubernetesClientFactory kubernetesClientFactory,
             final DockerCommandExecutor docker,
             final StorageManager storageManager,
             final ProjectArchiveLoader projectLoader,
@@ -74,6 +77,7 @@ public class KubernetesCommandExecutor
     {
         this.systemConfig = systemConfig;
         this.docker = docker;
+        this.kubernetesClientFactory = kubernetesClientFactory;
         this.storageManager = storageManager;
         this.projectLoader = projectLoader;
         this.clog = clog;
@@ -89,7 +93,7 @@ public class KubernetesCommandExecutor
             final KubernetesClientConfig clientConfig = KubernetesClientConfig.create(clusterName, systemConfig, config); // config exception
             final TemporalConfigStorage inConfigStorage = TemporalConfigStorage.createByTarget(storageManager, "in", systemConfig); // config exception
             final TemporalConfigStorage outConfigStorage = TemporalConfigStorage.createByTarget(storageManager, "out", systemConfig); // config exception
-            try (final KubernetesClient client = KubernetesClient.create(clientConfig)) {
+            try (final KubernetesClient client = kubernetesClientFactory.newClient(clientConfig)) {
                 return runOnKubernetes(context, request, client, inConfigStorage, outConfigStorage);
             }
         }
@@ -111,14 +115,14 @@ public class KubernetesCommandExecutor
         final TemporalConfigStorage outConfigStorage = TemporalConfigStorage.createByTarget(storageManager, "out", systemConfig); // config exception
         // TODO We'd better to treat config exception here
 
-        try (final KubernetesClient kubernetesClient = KubernetesClient.create(clientConfig)) {
-            return getCommandStatusFromKubernetes(context, previousStatusJson, kubernetesClient, outConfigStorage);
+        try (final KubernetesClient client = kubernetesClientFactory.newClient(clientConfig)) {
+            return getCommandStatusFromKubernetes(context, previousStatusJson, client, outConfigStorage);
         }
     }
 
     private CommandStatus runOnKubernetes(final CommandContext context,
             final CommandRequest request,
-            final KubernetesClient kubernetesClient,
+            final KubernetesClient client,
             final TemporalConfigStorage inConfigStorage,
             final TemporalConfigStorage outConfigStorage)
             throws IOException
@@ -181,7 +185,7 @@ public class KubernetesCommandExecutor
         logger.debug("Submit command line arguments to Kubernetes API: " + arguments);
 
         // Create and submit a pod to Kubernetes master
-        final Pod pod = runPod(kubernetesClient,
+        final Pod pod = runPod(client,
                 createUniquePodName(context.getTaskRequest()),
                 getContainerImage(context, request),
                 getEnvironments(context, request),
@@ -191,7 +195,7 @@ public class KubernetesCommandExecutor
                 arguments);
 
         final ObjectNode nextStatus = FACTORY.objectNode();
-        nextStatus.set("cluster_name", FACTORY.textNode(kubernetesClient.getConfig().getName()));
+        nextStatus.set("cluster_name", FACTORY.textNode(client.getConfig().getName()));
         nextStatus.set("pod_name", FACTORY.textNode(pod.getMetadata().getName()));
         nextStatus.set("io_directory", FACTORY.textNode(ioDirectoryPath.toString()));
         nextStatus.set("executor_state", FACTORY.objectNode());
@@ -200,12 +204,12 @@ public class KubernetesCommandExecutor
 
     private CommandStatus getCommandStatusFromKubernetes(final CommandContext context,
             final ObjectNode previousStatusJson,
-            final KubernetesClient kubernetesClient,
+            final KubernetesClient client,
             final TemporalConfigStorage outConfigStorage)
             throws IOException
     {
         final String podName = previousStatusJson.get("pod_name").asText();
-        final Pod pod = kubernetesClient.getPod(podName);
+        final Pod pod = client.getPod(podName);
 
         if (logger.isDebugEnabled()) {
             logger.debug("Get pod: " + pod.toString());
@@ -214,10 +218,10 @@ public class KubernetesCommandExecutor
         final ObjectNode previousExecutorState = (ObjectNode) previousStatusJson.get("executor_state");
         final ObjectNode nextExecutorState = previousExecutorState.deepCopy();
         // If the container doesn't start yet, it cannot extract any log messages from the container.
-        if (!kubernetesClient.isContainerWaiting(pod.getStatus().getContainerStatuses().get(0))) { // not 'waiting'
+        if (!client.isContainerWaiting(pod.getStatus().getContainerStatuses().get(0))) { // not 'waiting'
             // Read log and write it to CommandLogger
             final long offset = !previousExecutorState.has("log_offset") ? 0L : previousExecutorState.get("log_offset").asLong();
-            final String logMessage = kubernetesClient.getLog(podName, offset);
+            final String logMessage = client.getLog(podName, offset);
             log(logMessage, clog);
             nextExecutorState.set("log_offset", FACTORY.numberNode(offset + logMessage.length())); // update log_offset
         }
@@ -270,8 +274,7 @@ public class KubernetesCommandExecutor
         return dockerConfig;
     }
 
-    private static String createStorageKey(final TaskRequest request,
-            final String lastPathElementOfArchiveFile )
+    private static String createStorageKey(final TaskRequest request, final String lastPathElementOfArchiveFile)
     {
         // file key: {taskId}/{lastPathElementOfArchiveFile}
         return new StringBuilder()
