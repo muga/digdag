@@ -3,6 +3,9 @@ package io.digdag.standards.command.kubernetes;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.CharStreams;
+import io.digdag.client.config.Config;
+import io.digdag.spi.CommandContext;
+import io.digdag.spi.CommandRequest;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.ContainerBuilder;
 import io.fabric8.kubernetes.api.model.ContainerStatus;
@@ -31,7 +34,8 @@ public class DefaultKubernetesClient
     private final io.fabric8.kubernetes.client.DefaultKubernetesClient client;
 
     public DefaultKubernetesClient(final KubernetesClientConfig config,
-            final io.fabric8.kubernetes.client.DefaultKubernetesClient client) {
+            final io.fabric8.kubernetes.client.DefaultKubernetesClient client)
+    {
         this.config = config;
         this.client = client;
     }
@@ -43,23 +47,24 @@ public class DefaultKubernetesClient
     }
 
     @Override
-    public Pod runPod(final String podName,
-            final Map<String, String> podLabels,
-            final PodSpec podSpec)
+    public Pod runPod(final CommandContext context, final CommandRequest request,
+            final String name, final List<String> commands, final List<String> arguments)
     {
+        final Container container = createContainer(context, request, name, commands, arguments);
+        final PodSpec podSpec = createPodSpec(context, request, container);
         return client.pods()
                 .inNamespace(client.getNamespace())
                 .createNew()
                 .withNewMetadata()
-                .withName(podName)
-                .withLabels(podLabels)
+                .withName(name)
+                .withLabels(getPodLabels())
                 .endMetadata()
                 .withSpec(podSpec)
                 .done();
     }
 
     @Override
-    public Pod getPod(final String podName)
+    public Pod pollPod(final String podName)
     {
         return client.pods()
                 .inNamespace(client.getNamespace())
@@ -88,8 +93,26 @@ public class DefaultKubernetesClient
         }
     }
 
-    @Override
-    public PodSpec createPodSpec(final Container container)
+    protected Map<String, String> getPodLabels()
+    {
+        return ImmutableMap.of();
+    }
+
+    protected Container createContainer(final CommandContext context, final CommandRequest request,
+            final String name, final List<String> commands, final List<String> arguments)
+    {
+        return new ContainerBuilder()
+                .withName(name)
+                .withImage(getContainerImage(context, request))
+                .withEnv(toEnvVars(getEnvironments(context, request)))
+                .withResources(toResourceRequirements(getResourceLimits(context, request), getResourceRequests(context, request)))
+                .withCommand(commands)
+                .withArgs(arguments)
+                .build();
+    }
+
+    protected PodSpec createPodSpec(final CommandContext context, final CommandRequest request,
+            final Container container)
     {
         return new PodSpecBuilder()
                 //.withHostNetwork(true);
@@ -103,24 +126,30 @@ public class DefaultKubernetesClient
                 .build();
     }
 
-    @Override
-    public Container createContainer(
-            final String name,
-            final String image,
-            final Map<String, String> environments,
-            final Map<String, String> resourceLimits,
-            final Map<String, String> resourceRequests,
-            final List<String> commands,
-            final List<String> arguments)
+    protected String getContainerImage(final CommandContext context, final CommandRequest request)
     {
-        return new ContainerBuilder()
-                .withEnv(toEnvVars(environments))
-                .withName(name)
-                .withImage(image)
-                .withResources(toResourceRequirements(resourceLimits, resourceRequests))
-                .withCommand(commands)
-                .withArgs(arguments)
-                .build();
+        final Config config = context.getTaskRequest().getConfig();
+        final Config dockerConfig = config.getNested("docker");
+        return dockerConfig.get("image", String.class);
+    }
+
+    protected Map<String, String> getEnvironments(final CommandContext context, final CommandRequest request)
+    {
+        return request.getEnvironments();
+    }
+
+    protected Map<String, String> getResourceLimits(final CommandContext context, final CommandRequest request)
+    {
+        return ImmutableMap.of(
+                "memory", "1200Mi",
+                "cpu", "1",
+                "ephemeral-storage", "50Gi"
+        );
+    }
+
+    protected Map<String, String> getResourceRequests(final CommandContext context, final CommandRequest request)
+    {
+        return ImmutableMap.of();
     }
 
     private static List<EnvVar> toEnvVars(final Map<String, String> environments)
