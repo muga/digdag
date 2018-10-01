@@ -2,7 +2,6 @@ package io.digdag.standards.command;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.google.api.client.repackaged.com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.ByteStreams;
@@ -19,16 +18,12 @@ import io.digdag.spi.CommandExecutor;
 import io.digdag.spi.CommandLogger;
 import io.digdag.spi.CommandRequest;
 import io.digdag.spi.CommandStatus;
-import io.digdag.spi.Storage;
-import io.digdag.spi.StorageFileNotFoundException;
-import io.digdag.spi.StorageObject;
 import io.digdag.spi.TaskRequest;
 import io.digdag.standards.command.kubernetes.KubernetesClient;
 import io.digdag.standards.command.kubernetes.KubernetesClientConfig;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -92,9 +87,10 @@ public class KubernetesCommandExecutor
         final Optional<String> clusterName = Optional.empty();
         try {
             final KubernetesClientConfig clientConfig = KubernetesClientConfig.create(clusterName, systemConfig, config); // config exception
-            final TemporalConfigStorage storage = TemporalConfigStorage.create(storageManager, systemConfig); // config exception
+            final TemporalConfigStorage inConfigStorage = TemporalConfigStorage.createByTarget(storageManager, "in", systemConfig); // config exception
+            final TemporalConfigStorage outConfigStorage = TemporalConfigStorage.createByTarget(storageManager, "out", systemConfig); // config exception
             try (final KubernetesClient client = KubernetesClient.create(clientConfig)) {
-                return runOnKubernetes(context, request, client, storage);
+                return runOnKubernetes(context, request, client, inConfigStorage, outConfigStorage);
             }
         }
         catch (ConfigException e) {
@@ -112,58 +108,19 @@ public class KubernetesCommandExecutor
         final Config config = context.getTaskRequest().getConfig();
         final Optional<String> clusterName = Optional.of(previousStatusJson.get("cluster_name").asText());
         final KubernetesClientConfig clientConfig = KubernetesClientConfig.create(clusterName, systemConfig, config); // config exception
-        final TemporalConfigStorage storage = TemporalConfigStorage.create(storageManager, systemConfig); // config exception
+        final TemporalConfigStorage outConfigStorage = TemporalConfigStorage.createByTarget(storageManager, "out", systemConfig); // config exception
         // TODO We'd better to treat config exception here
 
         try (final KubernetesClient kubernetesClient = KubernetesClient.create(clientConfig)) {
-            final String podName = previousStatusJson.get("pod_name").asText();
-            final Pod pod = kubernetesClient.getPod(podName);
-
-            if (logger.isDebugEnabled()) {
-                logger.debug("Get pod: " + pod.toString());
-            }
-
-            final ObjectNode previousExecutorState = (ObjectNode) previousStatusJson.get("executor_state");
-            final ObjectNode nextExecutorState = previousExecutorState.deepCopy();
-            // If the container doesn't start yet, it cannot extract any log messages from the container.
-            if (!kubernetesClient.isContainerWaiting(pod.getStatus().getContainerStatuses().get(0))) { // not 'waiting'
-                // Read log and write it to CommandLogger
-                final long offset = !previousExecutorState.has("log_offset") ? 0L : previousExecutorState.get("log_offset").asLong();
-                final String logMessage = kubernetesClient.getLog(podName, offset);
-                log(logMessage, clog);
-                nextExecutorState.set("log_offset", FACTORY.numberNode(offset + logMessage.length())); // update log_offset
-            }
-            else { // 'waiting'
-                // Write pod status to the command logger to avoid users confusing. For example, the container
-                // waits starting if it will take long time to download container images.
-                log(String.format("Wait starting a pod. The current pod phase is {} ...", pod.getStatus().getPhase()), clog);
-            }
-
-            final ObjectNode nextStatusJson = previousStatusJson.deepCopy();
-            nextStatusJson.set("executor_state", nextExecutorState);
-
-            // If the Pod completed, it needs to create output contents to pass them to the command executor.
-            final String podPhase = pod.getStatus().getPhase();
-            final boolean isFinished = podPhase.equals("Succeeded") || podPhase.equals("Failed");
-
-            if (isFinished) {
-                final String ioDirectoryPathName = nextStatusJson.get("io_directory").asText();
-                final String outputArchivePathName = ".digdag/tmp/archive-output.tar.gz";
-                final String outputArchiveKey = createStorageKey(context.getTaskRequest(), ioDirectoryPathName, outputArchivePathName); // url format
-
-                // Download output config archive
-                final InputStream in = storage.getContentInputStream(outputArchiveKey);
-                ProjectArchives.extractTarArchive(context.getLocalProjectPath(), in); // runtime exception
-            }
-
-            return createCommandStatus(pod, isFinished, nextStatusJson);
+            return getCommandStatusFromKubernetes(context, previousStatusJson, kubernetesClient, outConfigStorage);
         }
     }
 
     private CommandStatus runOnKubernetes(final CommandContext context,
             final CommandRequest request,
             final KubernetesClient kubernetesClient,
-            final TemporalConfigStorage storage)
+            final TemporalConfigStorage inConfigStorage,
+            final TemporalConfigStorage outConfigStorage)
             throws IOException
     {
         final Path projectPath = context.getLocalProjectPath();
@@ -181,14 +138,15 @@ public class KubernetesCommandExecutor
         // in the project archive. It will be uploaded on temporal config storage and then, will be downloaded on
         // the container. The download URL is generated by pre-signed URL.
         final Path archivePath = createArchiveFromLocal(projectPath, request.getIoDirectory(), context.getTaskRequest());
-        final String archivePathName = projectPath.relativize(archivePath).toString(); // relative
+        final Path relativeArchivePath = projectPath.relativize(archivePath); // relative
+        final Path lastPathElementOfArchivePath = projectPath.resolve(".digdag/tmp").relativize(archivePath);
         try {
-            // Upload archive on params storage
-            final String archiveKey = createStorageKey(context.getTaskRequest(), ioDirectoryPath.toString(), archivePathName); // TODO url format
-            storage.uploadFile(archiveKey, archivePath); // IO exception
-            final String url = storage.getDirectDownloadUrl(archiveKey);
-            bashArguments.add("curl -s \"" + url + "\" --output " + archivePathName);
-            bashArguments.add("tar -zxf " + archivePathName);
+            // Upload archive on input config storage
+            final String archiveKey = createStorageKey(context.getTaskRequest(), lastPathElementOfArchivePath.toString());
+            inConfigStorage.uploadFile(archiveKey, archivePath); // IO exception
+            final String url = inConfigStorage.getDirectDownloadUrl(archiveKey);
+            bashArguments.add("curl -s \"" + url + "\" --output " + relativeArchivePath.toString());
+            bashArguments.add("tar -zxf " + relativeArchivePath.toString());
             final String pushdDir = request.getWorkingDirectory().toString();
             bashArguments.add("pushd " + (pushdDir.isEmpty() ? "." : pushdDir));
         }
@@ -207,13 +165,13 @@ public class KubernetesCommandExecutor
         bashArguments.add(request.getCommandLine().stream().map(Object::toString).collect(Collectors.joining(" ")));
         bashArguments.add("exit_code=$?");
 
-        // Create project archive path in the container
+        // Create output archive path in the container
         // Upload the archive file to the S3 bucket
-        final String outputArchivePathName = ".digdag/tmp/archive-output.tar.gz";
-        final String outputArchiveKey = createStorageKey(context.getTaskRequest(), ioDirectoryPath.toString(), outputArchivePathName); // url format
-        final String url = storage.getDirectUploadUrl(outputArchiveKey);
+        final String outputArchivePathName = ".digdag/tmp/archive-output.tar.gz"; // relative
+        final String outputArchiveKey = createStorageKey(context.getTaskRequest(), "archive-output.tar.gz");
+        final String url = outConfigStorage.getDirectUploadUrl(outputArchiveKey);
         bashArguments.add("popd");
-        bashArguments.add(String.format("tar -zcf %s  --exclude %s --exclude %s .digdag/tmp/", outputArchivePathName, archivePathName, outputArchivePathName));
+        bashArguments.add(String.format("tar -zcf %s  --exclude %s --exclude %s .digdag/tmp/", outputArchivePathName, relativeArchivePath.toString(), outputArchivePathName));
         bashArguments.add(String.format("curl -s -X PUT -T %s -L \"%s\"", outputArchivePathName, url));
         bashArguments.add("exit $exit_code");
 
@@ -238,6 +196,54 @@ public class KubernetesCommandExecutor
         nextStatus.set("io_directory", FACTORY.textNode(ioDirectoryPath.toString()));
         nextStatus.set("executor_state", FACTORY.objectNode());
         return createCommandStatus(pod, false, nextStatus);
+    }
+
+    private CommandStatus getCommandStatusFromKubernetes(final CommandContext context,
+            final ObjectNode previousStatusJson,
+            final KubernetesClient kubernetesClient,
+            final TemporalConfigStorage outConfigStorage)
+            throws IOException
+    {
+        final String podName = previousStatusJson.get("pod_name").asText();
+        final Pod pod = kubernetesClient.getPod(podName);
+
+        if (logger.isDebugEnabled()) {
+            logger.debug("Get pod: " + pod.toString());
+        }
+
+        final ObjectNode previousExecutorState = (ObjectNode) previousStatusJson.get("executor_state");
+        final ObjectNode nextExecutorState = previousExecutorState.deepCopy();
+        // If the container doesn't start yet, it cannot extract any log messages from the container.
+        if (!kubernetesClient.isContainerWaiting(pod.getStatus().getContainerStatuses().get(0))) { // not 'waiting'
+            // Read log and write it to CommandLogger
+            final long offset = !previousExecutorState.has("log_offset") ? 0L : previousExecutorState.get("log_offset").asLong();
+            final String logMessage = kubernetesClient.getLog(podName, offset);
+            log(logMessage, clog);
+            nextExecutorState.set("log_offset", FACTORY.numberNode(offset + logMessage.length())); // update log_offset
+        }
+        else { // 'waiting'
+            // Write pod status to the command logger to avoid users confusing. For example, the container
+            // waits starting if it will take long time to download container images.
+            log(String.format("Wait starting a pod. The current pod phase is {} ...", pod.getStatus().getPhase()), clog);
+        }
+
+        final ObjectNode nextStatusJson = previousStatusJson.deepCopy();
+        nextStatusJson.set("executor_state", nextExecutorState);
+
+        // If the Pod completed, it needs to create output contents to pass them to the command executor.
+        final String podPhase = pod.getStatus().getPhase();
+        final boolean isFinished = podPhase.equals("Succeeded") || podPhase.equals("Failed");
+
+        if (isFinished) {
+            final String outputArchivePathName = "archive-output.tar.gz";
+            final String outputArchiveKey = createStorageKey(context.getTaskRequest(), outputArchivePathName); // url format
+
+            // Download output config archive
+            final InputStream in = outConfigStorage.getContentInputStream(outputArchiveKey);
+            ProjectArchives.extractTarArchive(context.getLocalProjectPath(), in); // runtime exception
+        }
+
+        return createCommandStatus(pod, isFinished, nextStatusJson);
     }
 
     private static void log(final String message, final CommandLogger to)
@@ -265,14 +271,12 @@ public class KubernetesCommandExecutor
     }
 
     private static String createStorageKey(final TaskRequest request,
-            final String ioDirectoryName,
-            final String relativePath)
+            final String lastPathElementOfArchiveFile )
     {
-        // file key: {taskId}/{commandId}/{relativePath}
+        // file key: {taskId}/{lastPathElementOfArchiveFile}
         return new StringBuilder()
                 .append(request.getTaskId()).append("/")
-                .append(ioDirectoryName).append("/")
-                .append(relativePath)
+                .append(lastPathElementOfArchiveFile)
                 .toString();
     }
 

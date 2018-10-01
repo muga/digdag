@@ -2,7 +2,6 @@ package io.digdag.standards.command.kubernetes;
 
 import com.google.common.base.Throwables;
 import io.digdag.client.config.Config;
-import io.digdag.client.config.ConfigException;
 import io.digdag.core.storage.StorageManager;
 import io.digdag.spi.Storage;
 import io.digdag.spi.StorageFileNotFoundException;
@@ -16,10 +15,9 @@ public class TemporalConfigStorage
 {
     private static final String TEMPORAL_CONFIG_STORAGE_PARAMS_PREFIX = "agent.command_executor.kubernetes.config_storage.";
 
-    public static TemporalConfigStorage create(final StorageManager storageManager, final Config systemConfig)
-            throws ConfigException
+    public static TemporalConfigStorage createByTarget(final StorageManager storageManager, final String target, final Config systemConfig)
     {
-        final Storage storage = storageManager.create(systemConfig, TEMPORAL_CONFIG_STORAGE_PARAMS_PREFIX);
+        final Storage storage = storageManager.create(systemConfig, TEMPORAL_CONFIG_STORAGE_PARAMS_PREFIX + target + ".");
         return new TemporalConfigStorage(storage);
     }
 
