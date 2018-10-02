@@ -226,7 +226,7 @@ public class KubernetesCommandExecutor
         else { // 'waiting'
             // Write pod status to the command logger to avoid users confusing. For example, the container
             // waits starting if it will take long time to download container images.
-            log(String.format(Locale.ENGLISH, "Wait starting a pod. The current pod phase is {} ...", pod.getPhase()), clog);
+            log(String.format(Locale.ENGLISH, "Wait starting a pod. The current pod phase is %s ...", pod.getPhase()), clog);
         }
 
         final ObjectNode nextStatusJson = previousStatusJson.deepCopy();
