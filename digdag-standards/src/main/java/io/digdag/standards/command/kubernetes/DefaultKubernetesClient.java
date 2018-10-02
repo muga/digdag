@@ -11,7 +11,6 @@ import io.fabric8.kubernetes.api.model.ContainerBuilder;
 import io.fabric8.kubernetes.api.model.ContainerStatus;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
-import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodSpec;
 import io.fabric8.kubernetes.api.model.PodSpecBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
@@ -52,7 +51,7 @@ public class DefaultKubernetesClient
     {
         final Container container = createContainer(context, request, name, commands, arguments);
         final PodSpec podSpec = createPodSpec(context, request, container);
-        return client.pods()
+        final io.fabric8.kubernetes.api.model.Pod pod = client.pods()
                 .inNamespace(client.getNamespace())
                 .createNew()
                 .withNewMetadata()
@@ -61,21 +60,25 @@ public class DefaultKubernetesClient
                 .endMetadata()
                 .withSpec(podSpec)
                 .done();
+        return Pod.of(pod);
     }
 
     @Override
     public Pod pollPod(final String podName)
     {
-        return client.pods()
+        final io.fabric8.kubernetes.api.model.Pod pod = client.pods()
                 .inNamespace(client.getNamespace())
                 .withName(podName)
                 .get();
+        return Pod.of(pod);
     }
 
     @Override
-    public boolean isContainerWaiting(final ContainerStatus status)
+    public boolean isPodWaiting(final Pod pod)
     {
-        return status.getState().getWaiting() != null;
+        // We assume that a single container running on a pod.
+        final ContainerStatus containerStatus = pod.getStatus().getContainerStatuses().get(0);
+        return containerStatus.getState().getWaiting() != null;
     }
 
     @Override

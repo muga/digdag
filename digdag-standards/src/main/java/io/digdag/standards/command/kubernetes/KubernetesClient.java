@@ -11,13 +11,11 @@ public interface KubernetesClient
 {
     KubernetesClientConfig getConfig();
 
-    io.fabric8.kubernetes.api.model.Pod runPod(
-            CommandContext context, CommandRequest request,
-            String name, List<String> commands, List<String> arguments);
+    Pod runPod(CommandContext context, CommandRequest request, String name, List<String> commands, List<String> arguments);
 
-    io.fabric8.kubernetes.api.model.Pod pollPod(String podName);
+    Pod pollPod(String podName);
 
-    boolean isContainerWaiting(io.fabric8.kubernetes.api.model.ContainerStatus containerStatus);
+    boolean isPodWaiting(Pod pod);
 
     String getLog(String podName, long offset) throws IOException;
 

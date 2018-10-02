@@ -3,7 +3,6 @@ package io.digdag.standards.command;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.io.ByteStreams;
 import com.google.inject.Inject;
 import io.digdag.client.config.Config;
@@ -33,19 +32,13 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 import io.digdag.standards.command.kubernetes.KubernetesClientFactory;
+import io.digdag.standards.command.kubernetes.Pod;
 import io.digdag.standards.command.kubernetes.TemporalConfigStorage;
-import io.fabric8.kubernetes.api.model.Container;
-import io.fabric8.kubernetes.api.model.ContainerStateTerminated;
-import io.fabric8.kubernetes.api.model.ContainerStatus;
-import io.fabric8.kubernetes.api.model.Pod;
-import io.fabric8.kubernetes.api.model.PodSpec;
-import io.fabric8.kubernetes.api.model.PodStatus;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.compress.archivers.tar.TarConstants;
@@ -189,7 +182,7 @@ public class KubernetesCommandExecutor
 
         final ObjectNode nextStatus = FACTORY.objectNode();
         nextStatus.set("cluster_name", FACTORY.textNode(client.getConfig().getName()));
-        nextStatus.set("pod_name", FACTORY.textNode(pod.getMetadata().getName()));
+        nextStatus.set("pod_name", FACTORY.textNode(pod.getName()));
         nextStatus.set("io_directory", FACTORY.textNode(ioDirectoryPath.toString()));
         nextStatus.set("executor_state", FACTORY.objectNode());
         return createCommandStatus(pod, false, nextStatus);
@@ -211,7 +204,7 @@ public class KubernetesCommandExecutor
         final ObjectNode previousExecutorState = (ObjectNode) previousStatusJson.get("executor_state");
         final ObjectNode nextExecutorState = previousExecutorState.deepCopy();
         // If the container doesn't start yet, it cannot extract any log messages from the container.
-        if (!client.isContainerWaiting(pod.getStatus().getContainerStatuses().get(0))) { // not 'waiting'
+        if (!client.isPodWaiting(pod)) { // not 'waiting'
             // Read log and write it to CommandLogger
             final long offset = !previousExecutorState.has("log_offset") ? 0L : previousExecutorState.get("log_offset").asLong();
             final String logMessage = client.getLog(podName, offset);
@@ -221,14 +214,14 @@ public class KubernetesCommandExecutor
         else { // 'waiting'
             // Write pod status to the command logger to avoid users confusing. For example, the container
             // waits starting if it will take long time to download container images.
-            log(String.format("Wait starting a pod. The current pod phase is {} ...", pod.getStatus().getPhase()), clog);
+            log(String.format("Wait starting a pod. The current pod phase is {} ...", pod.getPhase()), clog);
         }
 
         final ObjectNode nextStatusJson = previousStatusJson.deepCopy();
         nextStatusJson.set("executor_state", nextExecutorState);
 
         // If the Pod completed, it needs to create output contents to pass them to the command executor.
-        final String podPhase = pod.getStatus().getPhase();
+        final String podPhase = pod.getPhase();
         final boolean isFinished = podPhase.equals("Succeeded") || podPhase.equals("Failed");
 
         if (isFinished) {
@@ -287,6 +280,17 @@ public class KubernetesCommandExecutor
                 .append(siteId).append("-")
                 .append(UUID.randomUUID().toString()) // UUID v4
                 .toString();
+    }
+
+    private CommandStatus createCommandStatus(final Pod pod,
+            final boolean isFinished,
+            final ObjectNode nextStatus)
+    {
+        // we don't need to update "io_directory"
+        if (isFinished) {
+            nextStatus.set("status_code", FACTORY.numberNode(pod.getStatusCode()));
+        }
+        return KubernetesCommandStatus.of(isFinished, nextStatus);
     }
 
     /**
@@ -414,22 +418,5 @@ public class KubernetesCommandExecutor
             }
         }
         return e;
-    }
-
-    private CommandStatus createCommandStatus(final Pod pod,
-            final boolean isFinished,
-            final ObjectNode nextStatus)
-    {
-        // we don't need to update "io_directory"
-
-        if (isFinished) {
-            // Extract status code from container status
-            final PodStatus podStatus = pod.getStatus();
-            final List<ContainerStatus> containerStatusList = podStatus.getContainerStatuses();
-            final ContainerStateTerminated terminated = containerStatusList.get(0).getState().getTerminated();
-            nextStatus.set("status_code", FACTORY.numberNode(terminated.getExitCode()));
-        }
-
-        return KubernetesCommandStatus.of(isFinished, nextStatus);
     }
 }
