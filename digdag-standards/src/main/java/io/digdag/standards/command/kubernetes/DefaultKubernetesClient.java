@@ -74,9 +74,28 @@ public class DefaultKubernetesClient
     }
 
     @Override
-    public boolean isPodWaiting(final Pod pod)
+    public boolean deletePod(final String podName)
     {
-        // We assume that a single container running on a pod.
+        // TODO need to retry?
+
+        // TODO
+        // We'd better to consider about pods graceful deletion here.
+        //
+        // References:
+        //   https://kubernetes.io/docs/concepts/workloads/pods/pod/#termination-of-pods
+        //   https://kubernetes.io/docs/tasks/run-application/force-delete-stateful-set-pod/
+        return client.pods()
+                .inNamespace(client.getNamespace())
+                .withName(podName)
+                .delete();
+    }
+
+    @Override
+    public boolean isWaitingContainerCreation(final Pod pod)
+    {
+        // TODO
+        // We assume that a single container running on a pod. If we will use multiples containers on a pod,
+        // the logic should be changed.
         final ContainerStatus containerStatus = pod.getStatus().getContainerStatuses().get(0);
         return containerStatus.getState().getWaiting() != null;
     }

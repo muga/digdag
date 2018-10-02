@@ -15,7 +15,9 @@ public interface KubernetesClient
 
     Pod pollPod(String podName);
 
-    boolean isPodWaiting(Pod pod);
+    boolean deletePod(String podName);
+
+    boolean isWaitingContainerCreation(Pod pod);
 
     String getLog(String podName, long offset) throws IOException;
 

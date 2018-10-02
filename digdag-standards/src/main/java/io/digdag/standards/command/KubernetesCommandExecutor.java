@@ -17,6 +17,7 @@ import io.digdag.spi.CommandExecutor;
 import io.digdag.spi.CommandLogger;
 import io.digdag.spi.CommandRequest;
 import io.digdag.spi.CommandStatus;
+import io.digdag.spi.TaskExecutionException;
 import io.digdag.spi.TaskRequest;
 import io.digdag.standards.command.kubernetes.KubernetesClient;
 import io.digdag.standards.command.kubernetes.KubernetesClientConfig;
@@ -30,6 +31,8 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -39,6 +42,7 @@ import java.util.stream.Collectors;
 import io.digdag.standards.command.kubernetes.KubernetesClientFactory;
 import io.digdag.standards.command.kubernetes.Pod;
 import io.digdag.standards.command.kubernetes.TemporalConfigStorage;
+import io.digdag.util.DurationParam;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.compress.archivers.tar.TarConstants;
@@ -49,6 +53,9 @@ import org.slf4j.LoggerFactory;
 public class KubernetesCommandExecutor
         implements CommandExecutor
 {
+    private static final String COMMAND_EXECUTOR_SYSTEM_CONFIG_PREFIX = "agent.command_executor.kubernetes.";
+
+    private static final Duration DEFAULT_POD_TTL = Duration.ofDays(1);
     private static final JsonNodeFactory FACTORY = JsonNodeFactory.instance;
     private static Logger logger = LoggerFactory.getLogger(KubernetesCommandExecutor.class);
 
@@ -58,6 +65,7 @@ public class KubernetesCommandExecutor
     private final StorageManager storageManager;
     private final ProjectArchiveLoader projectLoader;
     private final CommandLogger clog;
+    private final Duration podTTL;
 
     @Inject
     public KubernetesCommandExecutor(
@@ -74,6 +82,9 @@ public class KubernetesCommandExecutor
         this.storageManager = storageManager;
         this.projectLoader = projectLoader;
         this.clog = clog;
+        this.podTTL = systemConfig.getOptional(COMMAND_EXECUTOR_SYSTEM_CONFIG_PREFIX + "default_pod_ttl", DurationParam.class)
+                .transform(DurationParam::getDuration)
+                .or(DEFAULT_POD_TTL);
     }
 
     @Override
@@ -183,6 +194,7 @@ public class KubernetesCommandExecutor
         final ObjectNode nextStatus = FACTORY.objectNode();
         nextStatus.set("cluster_name", FACTORY.textNode(client.getConfig().getName()));
         nextStatus.set("pod_name", FACTORY.textNode(pod.getName()));
+        nextStatus.set("pod_creation_timestamp", FACTORY.numberNode(pod.getCreationTimestamp()));
         nextStatus.set("io_directory", FACTORY.textNode(ioDirectoryPath.toString()));
         nextStatus.set("executor_state", FACTORY.objectNode());
         return createCommandStatus(pod, false, nextStatus);
@@ -204,7 +216,7 @@ public class KubernetesCommandExecutor
         final ObjectNode previousExecutorState = (ObjectNode) previousStatusJson.get("executor_state");
         final ObjectNode nextExecutorState = previousExecutorState.deepCopy();
         // If the container doesn't start yet, it cannot extract any log messages from the container.
-        if (!client.isPodWaiting(pod)) { // not 'waiting'
+        if (!client.isWaitingContainerCreation(pod)) { // not 'waiting'
             // Read log and write it to CommandLogger
             final long offset = !previousExecutorState.has("log_offset") ? 0L : previousExecutorState.get("log_offset").asLong();
             final String logMessage = client.getLog(podName, offset);
@@ -214,7 +226,7 @@ public class KubernetesCommandExecutor
         else { // 'waiting'
             // Write pod status to the command logger to avoid users confusing. For example, the container
             // waits starting if it will take long time to download container images.
-            log(String.format("Wait starting a pod. The current pod phase is {} ...", pod.getPhase()), clog);
+            log(String.format(Locale.ENGLISH, "Wait starting a pod. The current pod phase is {} ...", pod.getPhase()), clog);
         }
 
         final ObjectNode nextStatusJson = previousStatusJson.deepCopy();
@@ -232,8 +244,32 @@ public class KubernetesCommandExecutor
             final InputStream in = outConfigStorage.getContentInputStream(outputArchiveKey);
             ProjectArchives.extractTarArchive(context.getLocalProjectPath(), in); // runtime exception
         }
+        else if (isRunningLongerThanTTL(previousStatusJson)) {
+            TaskRequest request = context.getTaskRequest();
+            long attemptId = request.getAttemptId();
+            long taskId = request.getTaskId();
+
+            final String message = String.format(Locale.ENGLISH, "Pod execution timeout: attempt=%d, task=%d", attemptId, taskId);
+            logger.warn(message);
+
+            // TODO
+            // Once Kubernetes deletes pods, their information cannot be searched. We'd better to find another way to
+            // handle long running pods.
+            logger.info(String.format("Delete pod %d", pod.getName()));
+            client.deletePod(pod.getName());
+
+            // Throw exception to stop the task as failure
+            throw new TaskExecutionException(message);
+        }
 
         return createCommandStatus(pod, isFinished, nextStatusJson);
+    }
+
+    private boolean isRunningLongerThanTTL(final ObjectNode previousStatusJson)
+    {
+        long creationTimestamp = previousStatusJson.get("pod_creation_timestamp").asLong();
+        long currentTimestamp = Instant.now().getEpochSecond();
+        return currentTimestamp > creationTimestamp + podTTL.getSeconds();
     }
 
     private static void log(final String message, final CommandLogger to)
