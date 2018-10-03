@@ -11,6 +11,8 @@ public interface KubernetesClient
 {
     KubernetesClientConfig getConfig();
 
+    List<Pod> listPods();
+
     Pod runPod(CommandContext context, CommandRequest request, String name, List<String> commands, List<String> arguments);
 
     Pod pollPod(String podName);

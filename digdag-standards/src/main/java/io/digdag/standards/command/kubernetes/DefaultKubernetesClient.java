@@ -46,6 +46,19 @@ public class DefaultKubernetesClient
     }
 
     @Override
+    public List<Pod> listPods()
+    {
+        final io.fabric8.kubernetes.api.model.PodList podList = client.pods()
+                .inNamespace(client.getNamespace())
+                .list();
+        final ImmutableList.Builder<Pod> pods = ImmutableList.builder();
+        for (final io.fabric8.kubernetes.api.model.Pod pod : podList.getItems()) {
+            pods.add(Pod.of(pod));
+        }
+        return pods.build();
+    }
+
+    @Override
     public Pod runPod(final CommandContext context, final CommandRequest request,
             final String name, final List<String> commands, final List<String> arguments)
     {
