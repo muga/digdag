@@ -2,6 +2,7 @@ package io.digdag.standards.command;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.ByteStreams;
 import com.google.inject.Inject;
@@ -35,7 +36,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -55,7 +55,8 @@ public class KubernetesCommandExecutor
 {
     private static final String COMMAND_EXECUTOR_SYSTEM_CONFIG_PREFIX = "agent.command_executor.kubernetes.";
 
-    private static final Duration DEFAULT_POD_TTL = Duration.ofDays(1);
+    private static final String DEFAULT_POD_TTL = COMMAND_EXECUTOR_SYSTEM_CONFIG_PREFIX + "default_pod_ttl";
+
     private static final JsonNodeFactory FACTORY = JsonNodeFactory.instance;
     private static Logger logger = LoggerFactory.getLogger(KubernetesCommandExecutor.class);
 
@@ -65,7 +66,7 @@ public class KubernetesCommandExecutor
     private final StorageManager storageManager;
     private final ProjectArchiveLoader projectLoader;
     private final CommandLogger clog;
-    private final Duration podTTL;
+    private final Optional<Duration> defaultPodTTL;
 
     @Inject
     public KubernetesCommandExecutor(
@@ -82,9 +83,9 @@ public class KubernetesCommandExecutor
         this.storageManager = storageManager;
         this.projectLoader = projectLoader;
         this.clog = clog;
-        this.podTTL = systemConfig.getOptional(COMMAND_EXECUTOR_SYSTEM_CONFIG_PREFIX + "default_pod_ttl", DurationParam.class)
+        this.defaultPodTTL = systemConfig.getOptional(DEFAULT_POD_TTL, DurationParam.class)
                 .transform(DurationParam::getDuration)
-                .or(DEFAULT_POD_TTL);
+                .or(Optional.absent());
     }
 
     @Override
@@ -92,7 +93,7 @@ public class KubernetesCommandExecutor
             throws IOException
     {
         final Config config = context.getTaskRequest().getConfig();
-        final Optional<String> clusterName = Optional.empty();
+        final Optional<String> clusterName = Optional.absent();
         try {
             final KubernetesClientConfig clientConfig = KubernetesClientConfig.create(clusterName, systemConfig, config); // config exception
             final TemporalConfigStorage inConfigStorage = TemporalConfigStorage.createByTarget(storageManager, "in", systemConfig); // config exception
@@ -244,7 +245,7 @@ public class KubernetesCommandExecutor
             final InputStream in = outConfigStorage.getContentInputStream(outputArchiveKey);
             ProjectArchives.extractTarArchive(context.getLocalProjectPath(), in); // runtime exception
         }
-        else if (isRunningLongerThanTTL(previousStatusJson)) {
+        else if (defaultPodTTL.isPresent() && isRunningLongerThanTTL(previousStatusJson)) {
             TaskRequest request = context.getTaskRequest();
             long attemptId = request.getAttemptId();
             long taskId = request.getTaskId();
@@ -269,7 +270,7 @@ public class KubernetesCommandExecutor
     {
         long creationTimestamp = previousStatusJson.get("pod_creation_timestamp").asLong();
         long currentTimestamp = Instant.now().getEpochSecond();
-        return currentTimestamp > creationTimestamp + podTTL.getSeconds();
+        return currentTimestamp > creationTimestamp + defaultPodTTL.get().getSeconds();
     }
 
     private static void log(final String message, final CommandLogger to)

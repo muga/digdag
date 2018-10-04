@@ -1,10 +1,9 @@
 package io.digdag.standards.command.kubernetes;
 
+import com.google.common.base.Optional;
 import io.digdag.client.config.Config;
 import io.digdag.client.config.ConfigException;
 import io.digdag.core.storage.StorageManager;
-
-import java.util.Optional;
 
 public class KubernetesClientConfig
 {
