@@ -26,7 +26,9 @@ public class KubernetesClientConfig
     private static KubernetesClientConfig createFromTaskRequestConfig(final Optional<String> name,
             final Config config)
     {
-        throw new UnsupportedOperationException("Not support yet"); // TODO
+        // TODO
+        // We'd better to customize cluster config by task request config??
+        throw new UnsupportedOperationException("Not support yet");
     }
 
     private static KubernetesClientConfig createFromSystemConfig(final Optional<String> name,
