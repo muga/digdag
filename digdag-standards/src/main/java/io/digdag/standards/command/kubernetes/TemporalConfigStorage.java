@@ -37,13 +37,11 @@ public class TemporalConfigStorage
 
     public String getDirectDownloadUrl(final String key)
     {
-        // TODO care of expiry? server-side encryption
         return storage.getDirectDownloadHandle(key).get().getUrl().toString();
     }
 
     public String getDirectUploadUrl(final String key)
     {
-        // TODO care of expiry? server-side encryption
         return storage.getDirectUploadHandle(key).get().getUrl().toString();
     }
 

@@ -114,7 +114,11 @@ public class KubernetesCommandExecutor
     public CommandStatus poll(final CommandContext context, final ObjectNode previousStatusJson)
             throws IOException
     {
+        // If executor is falled back in run method, this poll method needs not to be falled back because it's never
+        // used in fall back mode. Please see more details of command based operators.
+
         final Config config = context.getTaskRequest().getConfig();
+        // 'cluster_name' must be stored in previous status. previous status is generated during run method.
         final Optional<String> clusterName = Optional.of(previousStatusJson.get("cluster_name").asText());
         final KubernetesClientConfig clientConfig = KubernetesClientConfig.create(clusterName, systemConfig, config); // config exception
         final TemporalConfigStorage outConfigStorage = TemporalConfigStorage.createByTarget(storageManager, "out", systemConfig); // config exception
@@ -140,8 +144,11 @@ public class KubernetesCommandExecutor
         // Build command line arguments that will be passed to Kubernetes API here
         final ImmutableList.Builder<String> bashArguments = ImmutableList.builder();
 
-        //bashArguments.add("set -eux"); // TODO revisit we need it or not
-        bashArguments.add("mkdir -p " + ioDirectoryPath.toString());
+        // TODO
+        // Revisit we need it or not for debugging. If the command will be enabled, pods will show commands are executed
+        // by the executor and will include pre-signed URLs in the commands.
+        //bashArguments.add("set -eux");
+        bashArguments.add(s("mkdir -p %s", ioDirectoryPath.toString()));
 
         // Create project archive on local. Input contents, e.g. input config file and runner script, are included
         // in the project archive. It will be uploaded on temporal config storage and then, will be downloaded on
@@ -154,10 +161,10 @@ public class KubernetesCommandExecutor
             final String archiveKey = createStorageKey(context.getTaskRequest(), lastPathElementOfArchivePath.toString());
             inConfigStorage.uploadFile(archiveKey, archivePath); // IO exception
             final String url = inConfigStorage.getDirectDownloadUrl(archiveKey);
-            bashArguments.add("curl -s \"" + url + "\" --output " + relativeArchivePath.toString());
-            bashArguments.add("tar -zxf " + relativeArchivePath.toString());
+            bashArguments.add(s("curl -s \"%s\" --output %s", url, relativeArchivePath.toString()));
+            bashArguments.add(s("tar -zxf %s", relativeArchivePath.toString()));
             final String pushdDir = request.getWorkingDirectory().toString();
-            bashArguments.add("pushd " + (pushdDir.isEmpty() ? "." : pushdDir));
+            bashArguments.add(s("pushd %s", (pushdDir.isEmpty() ? "." : pushdDir)));
         }
         finally {
             if (archivePath != null) {
@@ -165,27 +172,28 @@ public class KubernetesCommandExecutor
                     Files.deleteIfExists(archivePath); // throw IOException
                 }
                 catch (IOException e) {
-                    logger.warn("Cannot remove a temporal project archive: {}" + archivePath.toString());
+                    // can be ignored because agent will delete project dir once the task will be finished.
+                    logger.info(s("Cannot remove a temporal project archive: %s", archivePath.toString()));
                 }
             }
         }
 
         // Add command passed from operator.
         bashArguments.add(request.getCommandLine().stream().map(Object::toString).collect(Collectors.joining(" ")));
-        bashArguments.add("exit_code=$?");
+        bashArguments.add(s("exit_code=$?"));
 
         // Create output archive path in the container
         // Upload the archive file to the S3 bucket
         final String outputArchivePathName = ".digdag/tmp/archive-output.tar.gz"; // relative
         final String outputArchiveKey = createStorageKey(context.getTaskRequest(), "archive-output.tar.gz");
         final String url = outConfigStorage.getDirectUploadUrl(outputArchiveKey);
-        bashArguments.add("popd");
-        bashArguments.add(String.format("tar -zcf %s  --exclude %s --exclude %s .digdag/tmp/", outputArchivePathName, relativeArchivePath.toString(), outputArchivePathName));
-        bashArguments.add(String.format("curl -s -X PUT -T %s -L \"%s\"", outputArchivePathName, url));
-        bashArguments.add("exit $exit_code");
+        bashArguments.add(s("popd"));
+        bashArguments.add(s("tar -zcf %s  --exclude %s --exclude %s .digdag/tmp/", outputArchivePathName, relativeArchivePath.toString(), outputArchivePathName));
+        bashArguments.add(s("curl -s -X PUT -T %s -L \"%s\"", outputArchivePathName, url));
+        bashArguments.add(s("exit $exit_code"));
 
-        final List<String> commands = ImmutableList.of("/bin/bash");
-        final List<String> arguments = ImmutableList.of("-c",
+        final List<String> commands = ImmutableList.of(s("/bin/bash"));
+        final List<String> arguments = ImmutableList.of(s("-c"),
                 bashArguments.build().stream().map(Object::toString).collect(Collectors.joining("; ")));
         logger.debug("Submit command line arguments to Kubernetes API: " + arguments);
 
@@ -227,7 +235,7 @@ public class KubernetesCommandExecutor
         else { // 'waiting'
             // Write pod status to the command logger to avoid users confusing. For example, the container
             // waits starting if it will take long time to download container images.
-            log(String.format(Locale.ENGLISH, "Wait starting a pod. The current pod phase is %s ...", pod.getPhase()), clog);
+            log(s("Wait starting a pod. The current pod phase is %s ...", pod.getPhase()), clog);
         }
 
         final ObjectNode nextStatusJson = previousStatusJson.deepCopy();
@@ -250,13 +258,13 @@ public class KubernetesCommandExecutor
             long attemptId = request.getAttemptId();
             long taskId = request.getTaskId();
 
-            final String message = String.format(Locale.ENGLISH, "Pod execution timeout: attempt=%d, task=%d", attemptId, taskId);
+            final String message = s("Pod execution timeout: attempt=%d, task=%d", attemptId, taskId);
             logger.warn(message);
 
             // TODO
             // Once Kubernetes deletes pods, their information cannot be searched. We'd better to find another way to
             // handle long running pods.
-            logger.info(String.format("Delete pod %d", pod.getName()));
+            logger.info(s("Delete pod %d", pod.getName()));
             client.deletePod(pod.getName());
 
             // Throw exception to stop the task as failure
@@ -281,7 +289,7 @@ public class KubernetesCommandExecutor
         to.copy(in, System.out);
     }
 
-    private static Config validateDockerConfig(final Config requestConfig)
+    private static void validateDockerConfig(final Config requestConfig)
     {
         if (!requestConfig.has("docker")) {
             throw new ConfigException("Parameter 'docker' is required but not set");
@@ -293,8 +301,6 @@ public class KubernetesCommandExecutor
         }
 
         // TODO revisit to check other config parameters
-
-        return dockerConfig;
     }
 
     private static String createStorageKey(final TaskRequest request, final String lastPathElementOfArchiveFile)
@@ -317,6 +323,11 @@ public class KubernetesCommandExecutor
                 .append(siteId).append("-")
                 .append(UUID.randomUUID().toString()) // UUID v4
                 .toString();
+    }
+
+    private static String s(final String format, final Object... args)
+    {
+        return String.format(Locale.ENGLISH, format, args);
     }
 
     private CommandStatus createCommandStatus(final Pod pod,
@@ -398,7 +409,7 @@ public class KubernetesCommandExecutor
             final Path normalizedAbsDest = absPath.getParent().resolve(rawDest).normalize();
 
             if (!normalizedAbsDest.startsWith(projectPath)) {
-                throw new IllegalArgumentException(String.format(Locale.ENGLISH,
+                throw new IllegalArgumentException(s(
                         "Invalid symbolic link: Given path '%s' is outside of project directory '%s'", normalizedAbsDest, projectPath));
             }
 

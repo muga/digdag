@@ -136,6 +136,9 @@ public class DefaultKubernetesClient
     protected PodSpec createPodSpec(final CommandContext context, final CommandRequest request,
             final Container container)
     {
+        // TODO
+        // Revisit what values should be extracted as config params or system config params
+
         return new PodSpecBuilder()
                 //.withHostNetwork(true);
                 //.withDnsPolicy("ClusterFirstWithHostNet");
@@ -162,11 +165,7 @@ public class DefaultKubernetesClient
 
     protected Map<String, String> getResourceLimits(final CommandContext context, final CommandRequest request)
     {
-        return ImmutableMap.of(
-                "memory", "1200Mi",
-                "cpu", "1",
-                "ephemeral-storage", "50Gi"
-        );
+        return ImmutableMap.of();
     }
 
     protected Map<String, String> getResourceRequests(final CommandContext context, final CommandRequest request)
