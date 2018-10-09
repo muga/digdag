@@ -2,7 +2,6 @@ package io.digdag.spi;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
-import java.nio.file.Path;
 
 public interface CommandExecutor
 {

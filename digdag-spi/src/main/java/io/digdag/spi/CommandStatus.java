@@ -3,7 +3,6 @@ package io.digdag.spi;
 import com.fasterxml.jackson.annotation.JsonValue;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-@Value.Immutable
 public interface CommandStatus
 {
     /**
