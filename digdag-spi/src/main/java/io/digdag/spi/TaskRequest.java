@@ -20,6 +20,8 @@ public interface TaskRequest
 
     Optional<String> getProjectName();
 
+    long getWorkflowId();
+
     String getWorkflowName();
 
     Optional<String> getRevision();

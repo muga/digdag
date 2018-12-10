@@ -19,6 +19,9 @@ public class RuntimeParams
         ZoneId timeZone = request.getTimeZone();
         params.set("timezone", timeZone);
 
+        // workflow_*
+        params.set("workflow_id", request.getWorkflowId());
+
         // session_*
         params.set("session_uuid", request.getSessionUuid().toString());
         params.set("session_time", formatSessionTime(request.getSessionTime(), timeZone));

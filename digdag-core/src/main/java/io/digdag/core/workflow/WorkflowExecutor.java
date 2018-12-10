@@ -1001,6 +1001,7 @@ public class WorkflowExecutor
                 .siteId(attempt.getSiteId())
                 .projectId(attempt.getSession().getProjectId())
                 .projectName(project.getName())
+                .workflowId(attempt.getWorkflowDefinitionId())
                 .workflowName(attempt.getSession().getWorkflowName())
                 .revision(rev.transform(it -> it.getName()))
                 .taskId(task.getId())
