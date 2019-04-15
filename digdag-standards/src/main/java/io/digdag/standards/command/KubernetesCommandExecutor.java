@@ -178,9 +178,11 @@ public class KubernetesCommandExecutor
             }
         }
 
+        bashArguments.addAll(setArgumentsBeforeScriptCommandLine());
         // Add command passed from operator.
         bashArguments.add(request.getCommandLine().stream().map(Object::toString).collect(Collectors.joining(" ")));
         bashArguments.add(s("exit_code=$?"));
+        bashArguments.addAll(setArgumentsAfterScriptCommandLine());
 
         // Create output archive path in the container
         // Upload the archive file to the S3 bucket
@@ -272,6 +274,16 @@ public class KubernetesCommandExecutor
         }
 
         return createCommandStatus(pod, isFinished, nextStatusJson);
+    }
+
+    protected List<String> setArgumentsBeforeScriptCommandLine()
+    {
+        return ImmutableList.of();
+    }
+
+    protected List<String> setArgumentsAfterScriptCommandLine()
+    {
+        return ImmutableList.of();
     }
 
     private boolean isRunningLongerThanTTL(final ObjectNode previousStatusJson)
