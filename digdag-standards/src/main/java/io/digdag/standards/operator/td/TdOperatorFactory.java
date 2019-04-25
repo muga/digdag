@@ -8,7 +8,6 @@ import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.inject.Inject;
 import com.treasuredata.client.TDClientHttpNotFoundException;
-import com.treasuredata.client.model.TDJob;
 import com.treasuredata.client.model.TDJobRequest;
 import com.treasuredata.client.model.TDJobRequestBuilder;
 import io.digdag.client.config.Config;
@@ -96,7 +95,6 @@ public class TdOperatorFactory
         private final Optional<UserSecretTemplate> resultUrl;
         private final int jobRetry;
         private final String engine;
-        private final Optional<String> engineVersion;
         private final Optional<String> poolName;
         private final Optional<String> downloadFile;
         private final Optional<String> resultConnection;
@@ -148,8 +146,6 @@ public class TdOperatorFactory
             this.storeLastResults = params.get("store_last_results", boolean.class, false);
 
             this.preview = params.get("preview", boolean.class, false);
-
-            this.engineVersion = params.getOptional("engine_version", String.class);
         }
 
         @Override
@@ -229,7 +225,6 @@ public class TdOperatorFactory
                     .setResultConnectionId(resultConnection.transform(name -> getResultConnectionId(name, op)))
                     .setResultConnectionSettings(resultSettings.transform(t -> t.format(context.getSecrets())))
                     .setDomainKey(domainKey)
-                    .setEngineVersion(engineVersion.transform(e -> TDJob.EngineVersion.fromString(e)).orNull())
                     .createTDJobRequest();
 
             String jobId = op.submitNewJobWithRetry(req);
