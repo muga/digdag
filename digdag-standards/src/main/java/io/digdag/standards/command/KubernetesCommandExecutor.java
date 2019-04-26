@@ -2,6 +2,7 @@ package io.digdag.standards.command;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.ByteStreams;
@@ -95,9 +96,9 @@ public class KubernetesCommandExecutor
         final Config config = context.getTaskRequest().getConfig();
         final Optional<String> clusterName = Optional.absent();
         try {
-            final KubernetesClientConfig clientConfig = KubernetesClientConfig.create(clusterName, systemConfig, config); // config exception
-            final TemporalConfigStorage inConfigStorage = TemporalConfigStorage.createByTarget(storageManager, "in", systemConfig); // config exception
-            final TemporalConfigStorage outConfigStorage = TemporalConfigStorage.createByTarget(storageManager, "out", systemConfig); // config exception
+            final KubernetesClientConfig clientConfig = createKubernetesClientConfig(clusterName, systemConfig, config); // config exception
+            final TemporalConfigStorage inConfigStorage = createTemporalConfigStorage(systemConfig, "in"); // config exception
+            final TemporalConfigStorage outConfigStorage = createTemporalConfigStorage(systemConfig, "out"); // config exception
             try (final KubernetesClient client = kubernetesClientFactory.newClient(clientConfig)) {
                 return runOnKubernetes(context, request, client, inConfigStorage, outConfigStorage);
             }
@@ -118,10 +119,13 @@ public class KubernetesCommandExecutor
         // used in fall back mode. Please see more details of command based operators.
 
         final Config config = context.getTaskRequest().getConfig();
-        // 'cluster_name' must be stored in previous status. previous status is generated during run method.
+        if (!previousStatusJson.has("cluster_name")) {
+            // 'cluster_name' must be stored in previous status. previous status is generated during run method.
+            throw new IllegalStateException("'cluster_name' must be stored in previous status");
+        }
         final Optional<String> clusterName = Optional.of(previousStatusJson.get("cluster_name").asText());
-        final KubernetesClientConfig clientConfig = KubernetesClientConfig.create(clusterName, systemConfig, config); // config exception
-        final TemporalConfigStorage outConfigStorage = TemporalConfigStorage.createByTarget(storageManager, "out", systemConfig); // config exception
+        final KubernetesClientConfig clientConfig = createKubernetesClientConfig(clusterName, systemConfig, config); // config exception
+        final TemporalConfigStorage outConfigStorage = createTemporalConfigStorage(systemConfig, "out"); // config exception
         // TODO We'd better to treat config exception here
 
         try (final KubernetesClient client = kubernetesClientFactory.newClient(clientConfig)) {
@@ -129,7 +133,22 @@ public class KubernetesCommandExecutor
         }
     }
 
-    private CommandStatus runOnKubernetes(final CommandContext context,
+    @VisibleForTesting
+    KubernetesClientConfig createKubernetesClientConfig(final Optional<String> clusterName, final Config systemConfig, final Config config)
+            throws ConfigException
+    {
+        return KubernetesClientConfig.create(clusterName, systemConfig, config);
+    }
+
+    @VisibleForTesting
+    TemporalConfigStorage createTemporalConfigStorage(final Config systemConfig, final String target)
+            throws ConfigException
+    {
+        return TemporalConfigStorage.createByTarget(storageManager, target, systemConfig);
+    }
+
+    @VisibleForTesting
+    CommandStatus runOnKubernetes(final CommandContext context,
             final CommandRequest request,
             final KubernetesClient client,
             final TemporalConfigStorage inConfigStorage,
@@ -211,7 +230,8 @@ public class KubernetesCommandExecutor
         return createCommandStatus(pod, false, nextStatus);
     }
 
-    private CommandStatus getCommandStatusFromKubernetes(final CommandContext context,
+    @VisibleForTesting
+    CommandStatus getCommandStatusFromKubernetes(final CommandContext context,
             final ObjectNode previousStatusJson,
             final KubernetesClient client,
             final TemporalConfigStorage outConfigStorage)
